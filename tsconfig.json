@@ -14,7 +14,8 @@
     "emitDecoratorMetadata": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
-    "types": ["node"]
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "types": ["node", "express-session"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
