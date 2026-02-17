@@ -1,0 +1,436 @@
+import { Request, Response } from "express";
+import { AppDataSource } from "../config/data-source";
+import { Course } from "../entities/Course";
+import { User } from "../entities/User";
+import { Category } from "../entities/Category";
+
+const courseRepository = AppDataSource.getRepository(Course);
+const userRepository = AppDataSource.getRepository(User);
+const categoryRepository = AppDataSource.getRepository(Category);
+
+export class CourseController {
+  /**
+   * Get all courses (published only for students, all for instructors/admin)
+   * GET /api/courses
+   */
+  static async getAll(req: Request, res: Response) {
+    try {
+      const { category, level, search, instructorId } = req.query;
+      const userRole = req.session.userRole;
+
+      const queryBuilder = courseRepository
+        .createQueryBuilder("course")
+        .leftJoinAndSelect("course.instructor", "instructor")
+        .leftJoinAndSelect("course.category", "category");
+
+      // Students can only see published courses
+      if (!userRole || userRole === "student") {
+        queryBuilder.where("course.isPublished = :isPublished", {
+          isPublished: true,
+        });
+      }
+
+      // Filter by category
+      if (category) {
+        queryBuilder.andWhere("course.categoryId = :categoryId", {
+          categoryId: category,
+        });
+      }
+
+      // Filter by level
+      if (level) {
+        queryBuilder.andWhere("course.level = :level", { level });
+      }
+
+      // Filter by instructor
+      if (instructorId) {
+        queryBuilder.andWhere("course.instructorId = :instructorId", {
+          instructorId,
+        });
+      }
+
+      // Search by title or description
+      if (search) {
+        queryBuilder.andWhere(
+          "(course.title LIKE :search OR course.description LIKE :search)",
+          { search: `%${search}%` }
+        );
+      }
+
+      const courses = await queryBuilder
+        .orderBy("course.createdAt", "DESC")
+        .getMany();
+
+      res.json({ courses });
+    } catch (error) {
+      console.error("Get courses error:", error);
+      res.status(500).json({ error: "Failed to fetch courses" });
+    }
+  }
+
+  /**
+   * Get single course with lessons
+   * GET /api/courses/:id
+   */
+  static async getById(req: Request, res: Response) {
+    try {
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const userId = req.session.userId;
+      const userRole = req.session.userRole;
+
+      const course = await courseRepository.findOne({
+        where: { id },
+        relations: ["instructor", "category", "lessons", "enrollments"],
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Check if user has access to unpublished courses
+      if (!course.isPublished) {
+        if (!userId) {
+          return res.status(403).json({ error: "Course not available" });
+        }
+
+        // Only instructor, admin, or enrolled students can view unpublished courses
+        const isInstructor = course.instructorId === userId;
+        const isAdmin = userRole === "admin";
+        const isEnrolled = course.enrollments?.some(
+          (e) => e.studentId === userId
+        );
+
+        if (!isInstructor && !isAdmin && !isEnrolled) {
+          return res.status(403).json({ error: "Course not available" });
+        }
+      }
+
+      // Sort lessons by sortOrder
+      if (course.lessons) {
+        course.lessons.sort((a, b) => a.sortOrder - b.sortOrder);
+      }
+
+      // Check if user is enrolled (if authenticated)
+      let isEnrolled = false;
+      if (userId && course.enrollments) {
+        isEnrolled = course.enrollments.some((e) => e.studentId === userId);
+      }
+
+      res.json({
+        course,
+        isEnrolled,
+      });
+    } catch (error) {
+      console.error("Get course error:", error);
+      res.status(500).json({ error: "Failed to fetch course" });
+    }
+  }
+
+  /**
+   * Get instructor's courses
+   * GET /api/courses/my-courses
+   */
+  static async getMyCourses(req: Request, res: Response) {
+    try {
+      const userId = req.session.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const courses = await courseRepository.find({
+        where: { instructorId: userId },
+        relations: ["category", "lessons", "enrollments"],
+        order: { createdAt: "DESC" },
+      });
+
+      res.json({ courses });
+    } catch (error) {
+      console.error("Get my courses error:", error);
+      res.status(500).json({ error: "Failed to fetch courses" });
+    }
+  }
+
+  /**
+   * Create new course (Instructor/Admin only)
+   * POST /api/courses
+   */
+  static async create(req: Request, res: Response) {
+    try {
+      const userId = req.session.userId;
+      const {
+        title,
+        slug,
+        description,
+        categoryId,
+        level,
+        price,
+        thumbnail,
+        previewVideoUrl,
+      } = req.body;
+
+      // Validation
+      if (!title || !slug || !categoryId) {
+        return res
+          .status(400)
+          .json({ error: "Title, slug, and category are required" });
+      }
+
+      // Check if slug already exists
+      const existingCourse = await courseRepository.findOne({
+        where: { slug },
+      });
+
+      if (existingCourse) {
+        return res
+          .status(409)
+          .json({ error: "Course with this slug already exists" });
+      }
+
+      // Verify category exists
+      const category = await categoryRepository.findOne({
+        where: { id: categoryId },
+      });
+
+      if (!category) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+
+      const course = courseRepository.create({
+        title,
+        slug,
+        description,
+        instructorId: userId!,
+        categoryId,
+        level: level || "beginner",
+        price: price || 0,
+        thumbnail,
+        previewVideoUrl,
+        status: "draft",
+        isPublished: false,
+      });
+
+      await courseRepository.save(course);
+
+      // Fetch with relations
+      const createdCourse = await courseRepository.findOne({
+        where: { id: course.id },
+        relations: ["instructor", "category"],
+      });
+
+      res.status(201).json({
+        message: "Course created successfully",
+        course: createdCourse,
+      });
+    } catch (error) {
+      console.error("Create course error:", error);
+      res.status(500).json({ error: "Failed to create course" });
+    }
+  }
+
+  /**
+   * Update course (Course instructor or Admin only)
+   * PUT /api/courses/:id
+   */
+  static async update(req: Request, res: Response) {
+    try {
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const userId = req.session.userId;
+      const userRole = req.session.userRole;
+      const {
+        title,
+        slug,
+        description,
+        categoryId,
+        level,
+        price,
+        thumbnailUrl,
+        previewVideoUrl,
+        status,
+        isPublished,
+      } = req.body;
+
+      const course = await courseRepository.findOne({
+        where: { id },
+        relations: ["instructor"],
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Check authorization
+      const isInstructor = course.instructorId === userId;
+      const isAdmin = userRole === "admin";
+
+      if (!isInstructor && !isAdmin) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to update this course" });
+      }
+
+      // Check if slug is being changed and if it already exists
+      if (slug && slug !== course.slug) {
+        const existingCourse = await courseRepository.findOne({
+          where: { slug },
+        });
+
+        if (existingCourse) {
+          return res
+            .status(409)
+            .json({ error: "Course with this slug already exists" });
+        }
+      }
+
+      // Verify category if being changed
+      if (categoryId && categoryId !== course.categoryId) {
+        const category = await categoryRepository.findOne({
+          where: { id: categoryId },
+        });
+
+        if (!category) {
+          return res.status(404).json({ error: "Category not found" });
+        }
+      }
+
+      // Update fields
+      if (title !== undefined) course.title = title;
+      if (slug !== undefined) course.slug = slug;
+      if (description !== undefined) course.description = description;
+      if (categoryId !== undefined) course.categoryId = categoryId;
+      if (level !== undefined) course.level = level;
+      if (price !== undefined) course.price = price;
+      if (thumbnailUrl !== undefined) course.thumbnail = thumbnailUrl;
+      if (previewVideoUrl !== undefined)
+        course.previewVideoUrl = previewVideoUrl;
+      if (status !== undefined) course.status = status;
+      if (isPublished !== undefined) course.isPublished = isPublished;
+
+      await courseRepository.save(course);
+
+      // Fetch with relations
+      const updatedCourse = await courseRepository.findOne({
+        where: { id },
+        relations: ["instructor", "category"],
+      });
+
+      res.json({
+        message: "Course updated successfully",
+        course: updatedCourse,
+      });
+    } catch (error) {
+      console.error("Update course error:", error);
+      res.status(500).json({ error: "Failed to update course" });
+    }
+  }
+
+  /**
+   * Delete course (Course instructor or Admin only)
+   * DELETE /api/courses/:id
+   */
+  static async delete(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = req.session.userId;
+      const userRole = req.session.userRole;
+
+      // Ensure param is string
+      if (Array.isArray(id)) {
+        return res.status(400).json({ error: "Invalid course ID" });
+      }
+
+      const course = await courseRepository.findOne({
+        where: { id: id as string },
+        relations: ["enrollments", "lessons"],
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Check authorization
+      const isInstructor = course.instructorId === userId;
+      const isAdmin = userRole === "admin";
+
+      if (!isInstructor && !isAdmin) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to delete this course" });
+      }
+
+      // Check if course has enrollments
+      if (course.enrollments && course.enrollments.length > 0) {
+        return res.status(400).json({
+          error: "Cannot delete course with existing enrollments",
+          enrollmentsCount: course.enrollments.length,
+        });
+      }
+
+      await courseRepository.remove(course);
+
+      res.json({ message: "Course deleted successfully" });
+    } catch (error) {
+      console.error("Delete course error:", error);
+      res.status(500).json({ error: "Failed to delete course" });
+    }
+  }
+
+  /**
+   * Publish/unpublish course
+   * PATCH /api/courses/:id/publish
+   */
+  static async togglePublish(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = req.session.userId;
+      const userRole = req.session.userRole;
+      const { isPublished } = req.body;
+
+      // Ensure param is string
+      if (Array.isArray(id)) {
+        return res.status(400).json({ error: "Invalid course ID" });
+      }
+
+      const course = await courseRepository.findOne({
+        where: { id: id as string },
+        relations: ["lessons"],
+      });
+
+      if (!course) {
+        return res.status(404).json({ error: "Course not found" });
+      }
+
+      // Check authorization
+      const isInstructor = course.instructorId === userId;
+      const isAdmin = userRole === "admin";
+
+      if (!isInstructor && !isAdmin) {
+        return res
+          .status(403)
+          .json({ error: "Not authorized to publish this course" });
+      }
+
+      // Validate course has lessons before publishing
+      if (isPublished && (!course.lessons || course.lessons.length === 0)) {
+        return res
+          .status(400)
+          .json({ error: "Cannot publish course without lessons" });
+      }
+
+      course.isPublished = isPublished;
+      if (isPublished) {
+        course.status = "published";
+      }
+
+      await courseRepository.save(course);
+
+      res.json({
+        message: `Course ${isPublished ? "published" : "unpublished"} successfully`,
+        course,
+      });
+    } catch (error) {
+      console.error("Toggle publish error:", error);
+      res.status(500).json({ error: "Failed to update course status" });
+    }
+  }
+}
