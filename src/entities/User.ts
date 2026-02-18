@@ -26,13 +26,24 @@ export class User {
   @Column({ name: "last_name", length: 100 })
   lastName!: string;
 
+  @Column({ length: 20, nullable: true })
+  phone?: string;
+
   @Column({
     type: "varchar",
     length: 20,
-    enum: ["student", "instructor", "admin"],
+    enum: ["student", "instructor", "parent", "admin"],
     default: "student",
   })
   role!: string;
+
+  @Column({
+    type: "varchar",
+    length: 20,
+    enum: ["active", "inactive", "suspended", "pending"],
+    default: "active",
+  })
+  status!: string;
 
   @Column({ type: "text", nullable: true })
   bio?: string;
