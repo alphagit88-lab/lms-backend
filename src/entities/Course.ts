@@ -58,6 +58,14 @@ export class Course {
   })
   level!: string;
 
+  @Column({
+    type: "varchar",
+    length: 20,
+    default: "english",
+    comment: "Teaching medium: english, sinhala, tamil",
+  })
+  medium!: string;
+
   @Column({ name: "duration_hours", nullable: true })
   durationHours?: number;
 

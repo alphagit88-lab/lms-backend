@@ -3,10 +3,12 @@ import { AppDataSource } from "../config/data-source";
 import { Course } from "../entities/Course";
 import { User } from "../entities/User";
 import { Category } from "../entities/Category";
+import { TeacherProfile } from "../entities/TeacherProfile";
 
 const courseRepository = AppDataSource.getRepository(Course);
 const userRepository = AppDataSource.getRepository(User);
 const categoryRepository = AppDataSource.getRepository(Category);
+const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
 
 export class CourseController {
   /**
@@ -15,7 +17,7 @@ export class CourseController {
    */
   static async getAll(req: Request, res: Response) {
     try {
-      const { category, level, search, instructorId } = req.query;
+      const { category, level, search, instructorId, medium } = req.query;
       const userRole = req.session.userRole;
 
       const queryBuilder = courseRepository
@@ -40,6 +42,11 @@ export class CourseController {
       // Filter by level
       if (level) {
         queryBuilder.andWhere("course.level = :level", { level });
+      }
+
+      // Filter by medium (language)
+      if (medium) {
+        queryBuilder.andWhere("course.medium = :medium", { medium });
       }
 
       // Filter by instructor
@@ -158,12 +165,14 @@ export class CourseController {
   static async create(req: Request, res: Response) {
     try {
       const userId = req.session.userId;
+      const userRole = req.session.userRole;
       const {
         title,
         slug,
         description,
         categoryId,
         level,
+        medium,
         price,
         thumbnail,
         previewVideoUrl,
@@ -175,6 +184,20 @@ export class CourseController {
           .status(400)
           .json({ error: "Title, slug, and category are required" });
       }
+
+      // Check if teacher is verified (admins can skip this check)
+      if (userRole === "instructor") {
+        const teacherProfile = await teacherProfileRepository.findOne({
+          where: { teacherId: userId! },
+        });
+
+        if (!teacherProfile || !teacherProfile.verified) {
+          return res.status(403).json({
+            error: "You must be verified by an admin before creating courses. Please wait for verification.",
+          });
+        }
+      }
+      // Note: Admins can create courses without verification (userRole === "admin" bypasses this check)
 
       // Check if slug already exists
       const existingCourse = await courseRepository.findOne({
@@ -203,6 +226,7 @@ export class CourseController {
         instructorId: userId!,
         categoryId,
         level: level || "beginner",
+        medium: medium || "english",
         price: price || 0,
         thumbnail,
         previewVideoUrl,
@@ -243,6 +267,7 @@ export class CourseController {
         description,
         categoryId,
         level,
+        medium,
         price,
         thumbnailUrl,
         previewVideoUrl,
@@ -299,6 +324,7 @@ export class CourseController {
       if (description !== undefined) course.description = description;
       if (categoryId !== undefined) course.categoryId = categoryId;
       if (level !== undefined) course.level = level;
+      if (medium !== undefined) course.medium = medium;
       if (price !== undefined) course.price = price;
       if (thumbnailUrl !== undefined) course.thumbnail = thumbnailUrl;
       if (previewVideoUrl !== undefined)
