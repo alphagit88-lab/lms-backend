@@ -34,9 +34,9 @@ export class AuthController {
       }
 
       // Role validation (if provided)
-      if (role && !["student", "instructor", "admin"].includes(role)) {
+      if (role && !["student", "instructor", "parent", "admin"].includes(role)) {
         return res.status(400).json({
-          error: "Invalid role. Must be student, instructor, or admin",
+          error: "Invalid role. Must be student, instructor, parent, or admin",
         });
       }
 
