@@ -1,12 +1,18 @@
 import { AppDataSource } from "../config/data-source";
 import { User } from "../entities/User";
+import { TeacherProfile } from "../entities/TeacherProfile";
+import { StudentProfile } from "../entities/StudentProfile";
+import { ParentProfile } from "../entities/ParentProfile";
 import bcrypt from "bcryptjs";
 
 export class AuthService {
   private userRepository = AppDataSource.getRepository(User);
+  private teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
+  private studentProfileRepository = AppDataSource.getRepository(StudentProfile);
+  private parentProfileRepository = AppDataSource.getRepository(ParentProfile);
 
   /**
-   * Register a new user
+   * Register a new user and auto-create role-specific profile
    */
   async register(data: {
     email: string;
@@ -27,22 +33,62 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
-    // Create user
-    const user = this.userRepository.create({
-      email: data.email,
-      password: hashedPassword,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      role: data.role || "student",
-      isActive: true,
-      emailVerified: false,
-    });
+    const role = data.role || "student";
 
-    await this.userRepository.save(user);
+    // Use transaction to ensure atomicity (user + profile creation)
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // Return user without password
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    try {
+      // Create user
+      const user = queryRunner.manager.create(User, {
+        email: data.email,
+        password: hashedPassword,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        role,
+        isActive: true,
+        emailVerified: false,
+      });
+
+      const savedUser = await queryRunner.manager.save(User, user);
+
+      // Auto-create role-specific profile
+      if (role === "instructor") {
+        const teacherProfile = queryRunner.manager.create(TeacherProfile, {
+          teacherId: savedUser.id,
+          verified: false, // Default to unverified, admin must approve
+        });
+        await queryRunner.manager.save(TeacherProfile, teacherProfile);
+      } else if (role === "student") {
+        // StudentProfile requires grade and medium, but we'll create with defaults
+        // User can update these later via profile page
+        const studentProfile = queryRunner.manager.create(StudentProfile, {
+          studentId: savedUser.id,
+          grade: "Grade 1", // Default, user should update
+          medium: "English", // Default, user should update
+        });
+        await queryRunner.manager.save(StudentProfile, studentProfile);
+      } else if (role === "parent") {
+        const parentProfile = queryRunner.manager.create(ParentProfile, {
+          parentId: savedUser.id,
+        });
+        await queryRunner.manager.save(ParentProfile, parentProfile);
+      }
+      // Admin role doesn't need a profile
+
+      await queryRunner.commitTransaction();
+
+      // Return user without password
+      const { password, ...userWithoutPassword } = savedUser;
+      return userWithoutPassword;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   /**
