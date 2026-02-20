@@ -56,6 +56,9 @@ export class TeacherProfile {
   @Column({ name: "availability_timezone", length: 100, nullable: true })
   availabilityTimezone?: string;
 
+  @Column({ name: "auto_confirm_bookings", default: false })
+  autoConfirmBookings!: boolean;
+
   @Column({ name: "total_sessions", default: 0 })
   totalSessions!: number;
 
