@@ -14,6 +14,7 @@ export { StudentParent, LinkStatus } from "./StudentParent";
 // Booking system
 export { AvailabilitySlot, SlotStatus } from "./AvailabilitySlot";
 export { Booking, BookingStatus } from "./Booking";
+export { BookingPackage, PackageStatus } from "./BookingPackage";
 
 // Payment system
 export { Payment, PaymentStatus, PaymentMethod, PaymentType } from "./Payment";

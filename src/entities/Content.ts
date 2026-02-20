@@ -66,6 +66,9 @@ export class Content {
   @Column({ name: "is_published", default: false })
   isPublished!: boolean;
 
+  @Column({ name: "is_downloadable", default: true, comment: "Whether content can be downloaded" })
+  isDownloadable!: boolean;
+
   @Column({ name: "download_count", default: 0 })
   downloadCount!: number;
 
