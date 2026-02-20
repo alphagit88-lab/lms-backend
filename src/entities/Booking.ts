@@ -10,6 +10,7 @@ import {
 } from "typeorm";
 import { User } from "./User";
 import { AvailabilitySlot } from "./AvailabilitySlot";
+import { BookingPackage } from "./BookingPackage";
 
 export enum BookingStatus {
   PENDING = "pending",
@@ -80,6 +81,15 @@ export class Booking {
   @Column({ name: "payment_id", nullable: true })
   paymentId?: string;
 
+  @Column({ name: "refund_percentage", type: "int", nullable: true, comment: "0, 50, or 100 based on cancellation policy" })
+  refundPercentage?: number;
+
+  @Column({ name: "refund_amount", type: "decimal", precision: 10, scale: 2, nullable: true })
+  refundAmount?: number;
+
+  @Column({ name: "package_id", nullable: true, comment: "FK to booking_packages for multi-session bookings" })
+  packageId?: string;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;
 
@@ -106,4 +116,8 @@ export class Booking {
   @ManyToOne(() => User)
   @JoinColumn({ name: "cancelled_by_id" })
   cancelledBy?: User;
+
+  @ManyToOne(() => BookingPackage, (pkg) => pkg.bookings, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "package_id" })
+  package?: BookingPackage;
 }
