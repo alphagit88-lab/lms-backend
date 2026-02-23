@@ -118,13 +118,13 @@ export class BookingController {
       // Check for overlapping bookings with the same teacher (conflict detection)
       const overlappingBooking = await queryRunner.manager
         .createQueryBuilder(Booking, "booking")
-        .where("booking.student_id = :studentId", { studentId: actualStudentId })
-        .andWhere("booking.teacher_id = :teacherId", { teacherId: slot.teacherId })
+        .where("booking.studentId = :studentId", { studentId: actualStudentId })
+        .andWhere("booking.teacherId = :teacherId", { teacherId: slot.teacherId })
         .andWhere("booking.status IN (:...statuses)", {
           statuses: [BookingStatus.PENDING, BookingStatus.CONFIRMED],
         })
         .andWhere(
-          "(booking.session_start_time < :slotEndTime AND booking.session_end_time > :slotStartTime)",
+          "(booking.sessionStartTime < :slotEndTime AND booking.sessionEndTime > :slotStartTime)",
           {
             slotStartTime: slot.startTime,
             slotEndTime: slot.endTime,
@@ -203,14 +203,14 @@ export class BookingController {
         .leftJoinAndSelect("booking.slot", "slot")
         .leftJoinAndSelect("booking.teacher", "teacher")
         .leftJoinAndSelect("booking.student", "student")
-        .where("booking.student_id = :userId", { userId });
+        .where("booking.studentId = :userId", { userId });
 
       if (status) {
         query = query.andWhere("booking.status = :status", { status });
       }
 
       if (upcoming === "true") {
-        query = query.andWhere("booking.session_start_time > :now", { now: new Date() });
+        query = query.andWhere("booking.sessionStartTime > :now", { now: new Date() });
       }
 
       // Get total count for pagination
@@ -218,7 +218,7 @@ export class BookingController {
 
       // Apply pagination
       const bookings = await query
-        .orderBy("booking.session_start_time", "DESC")
+        .orderBy("booking.sessionStartTime", "DESC")
         .skip(pagination.offset)
         .take(pagination.limit)
         .getMany();
@@ -284,7 +284,7 @@ export class BookingController {
       let query = bookingRepository.createQueryBuilder("booking")
         .leftJoinAndSelect("booking.slot", "slot")
         .leftJoinAndSelect("booking.student", "student")
-        .where("booking.teacher_id = :teacherId", { teacherId });
+        .where("booking.teacherId = :teacherId", { teacherId });
 
       if (status) {
         query = query.andWhere("booking.status = :status", { status });
@@ -296,13 +296,13 @@ export class BookingController {
         const endOfDay = new Date(startOfDay);
         endOfDay.setHours(23, 59, 59, 999);
 
-        query = query.andWhere("booking.session_start_time BETWEEN :start AND :end", {
+        query = query.andWhere("booking.sessionStartTime BETWEEN :start AND :end", {
           start: startOfDay,
           end: endOfDay,
         });
       }
 
-      const bookings = await query.orderBy("booking.session_start_time", "ASC").getMany();
+      const bookings = await query.orderBy("booking.sessionStartTime", "ASC").getMany();
 
       return res.json({ bookings });
     } catch (error: any) {
@@ -719,9 +719,9 @@ export class BookingController {
         .leftJoinAndSelect("package.student", "student");
 
       if (userRole === "instructor") {
-        query = query.where("package.teacher_id = :userId", { userId });
+        query = query.where("package.teacherId = :userId", { userId });
       } else {
-        query = query.where("package.student_id = :userId OR package.booked_by_id = :userId", { userId });
+        query = query.where("package.studentId = :userId OR package.bookedById = :userId", { userId });
       }
 
       if (status) {

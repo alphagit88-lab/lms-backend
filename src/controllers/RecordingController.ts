@@ -130,7 +130,7 @@ export class RecordingController {
         .createQueryBuilder("recording")
         .leftJoinAndSelect("recording.session", "session")
         .leftJoin("session.class", "class")
-        .leftJoin("class.instructor", "instructor");
+        .leftJoin("class.teacher", "teacher");
 
       // Filters
       if (sessionId) {
@@ -148,7 +148,7 @@ export class RecordingController {
       }
 
       if (teacherId) {
-        queryBuilder.andWhere("class.instructorId = :teacherId", { teacherId });
+        queryBuilder.andWhere("class.teacherId = :teacherId", { teacherId });
       }
 
       // Access control: students can only see public recordings or recordings from classes they booked
