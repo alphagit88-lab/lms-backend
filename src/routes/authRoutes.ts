@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { AuthController } from "../controllers/AuthController";
 import { authenticate } from "../middleware/authMiddleware";
+import { authRateLimiter, registerRateLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
 
-// Public routes
-router.post("/register", AuthController.register);
-router.post("/login", AuthController.login);
+// Public routes with rate limiting
+router.post("/register", registerRateLimiter, AuthController.register);
+router.post("/login", authRateLimiter, AuthController.login);
 router.post("/logout", AuthController.logout);
 router.get("/status", AuthController.checkStatus);
 

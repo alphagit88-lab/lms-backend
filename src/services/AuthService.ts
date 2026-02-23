@@ -83,8 +83,14 @@ export class AuthService {
       // Return user without password
       const { password, ...userWithoutPassword } = savedUser;
       return userWithoutPassword;
-    } catch (error) {
+    } catch (error: any) {
       await queryRunner.rollbackTransaction();
+      
+      // Handle unique constraint violation (email already exists)
+      if (error.code === "23505" || error.code === "ER_DUP_ENTRY" || error.message?.includes("unique constraint") || error.message?.includes("duplicate key")) {
+        throw new Error("User with this email already exists");
+      }
+      
       throw error;
     } finally {
       await queryRunner.release();

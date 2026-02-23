@@ -4,6 +4,9 @@ import { Course } from "../entities/Course";
 import { User } from "../entities/User";
 import { Category } from "../entities/Category";
 import { TeacherProfile } from "../entities/TeacherProfile";
+import { validatePrice, validateStringLength } from "../utils/validation";
+import { parsePagination, createPaginationMeta } from "../utils/pagination";
+import { Logger } from "../utils/logger";
 
 const courseRepository = AppDataSource.getRepository(Course);
 const userRepository = AppDataSource.getRepository(User);
@@ -64,13 +67,32 @@ export class CourseController {
         );
       }
 
+      // Parse pagination parameters
+      const pagination = parsePagination(req.query, 20, 100);
+
+      // Get total count for pagination
+      const totalCount = await queryBuilder.getCount();
+
+      // Apply pagination
       const courses = await queryBuilder
         .orderBy("course.createdAt", "DESC")
+        .skip(pagination.offset)
+        .take(pagination.limit)
         .getMany();
 
-      res.json({ courses });
+      // Create pagination metadata
+      const paginationMeta = createPaginationMeta(
+        pagination.page,
+        pagination.limit,
+        totalCount
+      );
+
+      res.json({
+        courses,
+        pagination: paginationMeta,
+      });
     } catch (error) {
-      console.error("Get courses error:", error);
+      Logger.error("Get courses error:", error, req);
       res.status(500).json({ error: "Failed to fetch courses" });
     }
   }
@@ -183,6 +205,34 @@ export class CourseController {
         return res
           .status(400)
           .json({ error: "Title, slug, and category are required" });
+      }
+
+      // Validate title length (max 200 chars per entity)
+      const titleValidation = validateStringLength(title, "Title", 200, 1);
+      if (!titleValidation.isValid) {
+        return res.status(400).json({ error: titleValidation.error });
+      }
+
+      // Validate slug length (max 250 chars per entity, unique)
+      const slugValidation = validateStringLength(slug, "Slug", 250, 1);
+      if (!slugValidation.isValid) {
+        return res.status(400).json({ error: slugValidation.error });
+      }
+
+      // Validate description length if provided (text field, reasonable limit)
+      if (description) {
+        const descValidation = validateStringLength(description, "Description", 50000);
+        if (!descValidation.isValid) {
+          return res.status(400).json({ error: descValidation.error });
+        }
+      }
+
+      // Validate price if provided
+      if (price !== undefined && price !== null) {
+        const priceValidation = validatePrice(price, 0, 1000000);
+        if (!priceValidation.isValid) {
+          return res.status(400).json({ error: priceValidation.error });
+        }
       }
 
       // Check if teacher is verified (admins can skip this check)

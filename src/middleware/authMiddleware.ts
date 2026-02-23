@@ -2,6 +2,11 @@ import "../types/express-session";
 import { Request, Response, NextFunction } from "express";
 import { Permission, Role, hasPermission, getRolePermissions } from "../config/permissions";
 import { AppDataSource } from "../config/data-source";
+import { Course } from "../entities/Course";
+import { Lesson } from "../entities/Lesson";
+import { Content } from "../entities/Content";
+import { Booking } from "../entities/Booking";
+import { AvailabilitySlot } from "../entities/AvailabilitySlot";
 
 /**
  * Middleware to check if user is authenticated
@@ -89,14 +94,25 @@ export const requirePermission = (permission: Permission) => {
  * Resource ownership validation middleware
  * Verifies that the authenticated user owns the requested resource
  * Admin users bypass this check
- * @param resourceType - Entity name (e.g., 'Course', 'Lesson')
+ * @param resourceType - Entity name (e.g., 'Course', 'Lesson') - MUST be from whitelist
  * @param resourceIdParam - Request parameter containing resource ID (default: 'id')
  * @param ownerField - Field name in entity that contains owner ID (default: 'instructorId')
  */
+// Whitelist of allowed resource types to prevent SQL injection
+const ALLOWED_RESOURCE_TYPES = {
+  Course: { entity: Course, ownerField: "instructorId" },
+  Lesson: { entity: Lesson, ownerField: "instructorId" },
+  Content: { entity: Content, ownerField: "teacherId" },
+  Booking: { entity: Booking, ownerField: "teacherId" },
+  AvailabilitySlot: { entity: AvailabilitySlot, ownerField: "teacherId" },
+} as const;
+
+type AllowedResourceType = keyof typeof ALLOWED_RESOURCE_TYPES;
+
 export const requireOwnership = (
   resourceType: string,
   resourceIdParam: string = "id",
-  ownerField: string = "instructorId"
+  ownerField?: string
 ) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -116,10 +132,24 @@ export const requireOwnership = (
         });
       }
 
-      // Get repository for the resource type
-      const repository = AppDataSource.getRepository(resourceType);
+      // Ensure resourceId is a string (handle case where it might be an array)
+      const finalResourceId = Array.isArray(resourceId) ? resourceId[0] : resourceId;
+
+      // Validate resourceType against whitelist to prevent SQL injection
+      if (!(resourceType in ALLOWED_RESOURCE_TYPES)) {
+        return res.status(400).json({
+          error: "Invalid resource type",
+          message: `Resource type '${resourceType}' is not allowed`,
+        });
+      }
+
+      const resourceConfig = ALLOWED_RESOURCE_TYPES[resourceType as AllowedResourceType];
+      const finalOwnerField = ownerField || resourceConfig.ownerField;
+
+      // Get repository for the resource type (now safe from injection)
+      const repository = AppDataSource.getRepository(resourceConfig.entity);
       const resource = await repository.findOne({
-        where: { id: resourceId } as any,
+        where: { id: finalResourceId },
       });
 
       if (!resource) {
@@ -129,7 +159,7 @@ export const requireOwnership = (
       }
 
       // Check ownership
-      const ownerId = (resource as any)[ownerField];
+      const ownerId = (resource as any)[finalOwnerField];
       
       if (ownerId !== userId) {
         return res.status(403).json({
@@ -187,6 +217,11 @@ export const sanitizeUserData = (
     const sanitize = (obj: any): any => {
       if (Array.isArray(obj)) {
         return obj.map(sanitize);
+      }
+
+      // Preserve Date objects — spreading them produces an empty plain object {}
+      if (obj instanceof Date) {
+        return obj;
       }
       
       if (obj && typeof obj === "object") {

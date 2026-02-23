@@ -7,6 +7,9 @@ import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { TeacherProfile } from "../entities/TeacherProfile";
 import { Payment, PaymentStatus } from "../entities/Payment";
 import { User } from "../entities/User";
+import { QueryRunner } from "typeorm";
+import { parsePagination, createPaginationMeta } from "../utils/pagination";
+import { Logger } from "../utils/logger";
 
 /**
  * Cancellation refund policy:
@@ -33,6 +36,10 @@ function calculateRefundPercentage(
 export class BookingController {
   // Create a booking (Student or Parent)
   static createBooking = async (req: Request, res: Response): Promise<Response> => {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
       const { slotId, studentId, notes } = req.body;
       const bookedById = req.session.userId!;
@@ -40,17 +47,20 @@ export class BookingController {
 
       // Validation
       if (!slotId) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "Slot ID is required" });
       }
 
       // If parent is booking, verify they are linked to the student
       if (userRole === "parent") {
         if (!studentId) {
+          await queryRunner.rollbackTransaction();
+          await queryRunner.release();
           return res.status(400).json({ error: "Student ID is required for parent bookings" });
         }
 
-        const linkRepository = AppDataSource.getRepository(StudentParent);
-        const link = await linkRepository.findOne({
+        const link = await queryRunner.manager.findOne(StudentParent, {
           where: {
             parentId: bookedById,
             studentId,
@@ -59,6 +69,8 @@ export class BookingController {
         });
 
         if (!link) {
+          await queryRunner.rollbackTransaction();
+          await queryRunner.release();
           return res.status(403).json({ error: "You are not linked to this student" });
         }
       }
@@ -66,42 +78,81 @@ export class BookingController {
       // Determine the actual student ID
       const actualStudentId = userRole === "parent" ? studentId : bookedById;
 
-      // Get the slot
-      const slotRepository = AppDataSource.getRepository(AvailabilitySlot);
-      const slot = await slotRepository.findOne({ where: { id: slotId } });
+      // Get the slot with row-level lock to prevent race conditions
+      const slot = await queryRunner.manager
+        .createQueryBuilder(AvailabilitySlot, "slot")
+        .setLock("pessimistic_write")
+        .where("slot.id = :slotId", { slotId })
+        .getOne();
 
       if (!slot) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(404).json({ error: "Availability slot not found" });
       }
 
       if (slot.status !== SlotStatus.AVAILABLE) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "This slot is not available for booking" });
       }
 
-      // Check if slot is already fully booked
+      // Check if slot is already fully booked (with lock, this is now safe)
       if (slot.currentBookings >= slot.maxBookings) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "This slot is fully booked" });
       }
 
       // Check if student already has a booking for this slot
-      const bookingRepository = AppDataSource.getRepository(Booking);
-      const existingBooking = await bookingRepository.findOne({
+      const existingBooking = await queryRunner.manager.findOne(Booking, {
         where: { slotId, studentId: actualStudentId },
       });
 
       if (existingBooking) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(409).json({ error: "You already have a booking for this slot" });
       }
 
+      // Check for overlapping bookings with the same teacher (conflict detection)
+      const overlappingBooking = await queryRunner.manager
+        .createQueryBuilder(Booking, "booking")
+        .where("booking.student_id = :studentId", { studentId: actualStudentId })
+        .andWhere("booking.teacher_id = :teacherId", { teacherId: slot.teacherId })
+        .andWhere("booking.status IN (:...statuses)", {
+          statuses: [BookingStatus.PENDING, BookingStatus.CONFIRMED],
+        })
+        .andWhere(
+          "(booking.session_start_time < :slotEndTime AND booking.session_end_time > :slotStartTime)",
+          {
+            slotStartTime: slot.startTime,
+            slotEndTime: slot.endTime,
+          }
+        )
+        .getOne();
+
+      if (overlappingBooking) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
+        return res.status(409).json({
+          error: "You already have a booking with this teacher at an overlapping time",
+          conflictingBooking: {
+            id: overlappingBooking.id,
+            startTime: overlappingBooking.sessionStartTime,
+            endTime: overlappingBooking.sessionEndTime,
+          },
+        });
+      }
+
       // Check if teacher has auto-confirm enabled
-      const profileRepository = AppDataSource.getRepository(TeacherProfile);
-      const teacherProfile = await profileRepository.findOne({
+      const teacherProfile = await queryRunner.manager.findOne(TeacherProfile, {
         where: { teacherId: slot.teacherId },
       });
       const shouldAutoConfirm = teacherProfile?.autoConfirmBookings === true;
 
       // Create the booking
-      const booking = bookingRepository.create({
+      const booking = queryRunner.manager.create(Booking, {
         slotId,
         studentId: actualStudentId,
         teacherId: slot.teacherId,
@@ -113,14 +164,16 @@ export class BookingController {
         status: shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING,
       });
 
-      await bookingRepository.save(booking);
+      await queryRunner.manager.save(Booking, booking);
 
-      // Update slot booking count
+      // Update slot booking count (atomic within transaction)
       slot.currentBookings += 1;
       if (slot.currentBookings >= slot.maxBookings) {
         slot.status = SlotStatus.BOOKED;
       }
-      await slotRepository.save(slot);
+      await queryRunner.manager.save(AvailabilitySlot, slot);
+
+      await queryRunner.commitTransaction();
 
       const message = shouldAutoConfirm
         ? "Booking created and auto-confirmed"
@@ -128,8 +181,11 @@ export class BookingController {
 
       return res.status(201).json({ message, booking, autoConfirmed: shouldAutoConfirm });
     } catch (error: any) {
+      await queryRunner.rollbackTransaction();
       console.error("Error creating booking:", error);
       return res.status(500).json({ error: "Failed to create booking" });
+    } finally {
+      await queryRunner.release();
     }
   };
 
@@ -138,6 +194,9 @@ export class BookingController {
     try {
       const userId = req.session.userId!;
       const { status, upcoming } = req.query;
+
+      // Parse pagination parameters
+      const pagination = parsePagination(req.query, 20, 100);
 
       const bookingRepository = AppDataSource.getRepository(Booking);
       let query = bookingRepository.createQueryBuilder("booking")
@@ -154,11 +213,29 @@ export class BookingController {
         query = query.andWhere("booking.session_start_time > :now", { now: new Date() });
       }
 
-      const bookings = await query.orderBy("booking.session_start_time", "DESC").getMany();
+      // Get total count for pagination
+      const totalCount = await query.getCount();
 
-      return res.json({ bookings });
+      // Apply pagination
+      const bookings = await query
+        .orderBy("booking.session_start_time", "DESC")
+        .skip(pagination.offset)
+        .take(pagination.limit)
+        .getMany();
+
+      // Create pagination metadata
+      const paginationMeta = createPaginationMeta(
+        pagination.page,
+        pagination.limit,
+        totalCount
+      );
+
+      return res.json({
+        bookings,
+        pagination: paginationMeta,
+      });
     } catch (error: any) {
-      console.error("Error fetching bookings:", error);
+      Logger.error("Error fetching bookings:", error, req);
       return res.status(500).json({ error: "Failed to fetch bookings" });
     }
   };

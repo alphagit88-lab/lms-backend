@@ -33,6 +33,18 @@ export class AuthController {
           .json({ error: "Password must be at least 8 characters long" });
       }
 
+      // Password complexity validation
+      const hasUpperCase = /[A-Z]/.test(password);
+      const hasLowerCase = /[a-z]/.test(password);
+      const hasNumber = /[0-9]/.test(password);
+      const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+
+      if (!hasUpperCase || !hasLowerCase || !hasNumber || !hasSpecialChar) {
+        return res.status(400).json({
+          error: "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        });
+      }
+
       // Role validation (if provided)
       if (role && !["student", "instructor", "parent", "admin"].includes(role)) {
         return res.status(400).json({
@@ -196,6 +208,18 @@ export class AuthController {
         return res
           .status(400)
           .json({ error: "New password must be at least 8 characters long" });
+      }
+
+      // Password complexity validation
+      const hasUpperCase = /[A-Z]/.test(newPassword);
+      const hasLowerCase = /[a-z]/.test(newPassword);
+      const hasNumber = /[0-9]/.test(newPassword);
+      const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
+
+      if (!hasUpperCase || !hasLowerCase || !hasNumber || !hasSpecialChar) {
+        return res.status(400).json({
+          error: "New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        });
       }
 
       const result = await authService.changePassword(

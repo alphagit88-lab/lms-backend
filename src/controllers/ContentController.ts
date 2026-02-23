@@ -5,6 +5,9 @@ import { FileStorageService } from "../services/FileStorageService";
 import { Enrollment } from "../entities/Enrollment";
 import { Payment, PaymentType } from "../entities/Payment";
 import { Express } from "express";
+import { validatePrice, validateStringLength } from "../utils/validation";
+import { parsePagination, createPaginationMeta } from "../utils/pagination";
+import { Logger } from "../utils/logger";
 
 type MulterRequest = Express.Request & {
   file?: Express.Multer.File;
@@ -21,16 +24,26 @@ export class ContentController {
    * Upload content (Teacher only)
    * POST /api/content/upload
    */
-  static async upload(req: MulterRequest, res: Response) {
+  static async upload(req: MulterRequest | Request, res: Response) {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    let fileUrl: string | null = null;
+
     try {
       const userId = req.session.userId;
       const userRole = req.session.userRole;
 
       if (userRole !== "instructor" && userRole !== "admin") {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(403).json({ error: "Only instructors can upload content" });
       }
 
       if (!req.file) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "File is required" });
       }
 
@@ -49,33 +62,68 @@ export class ContentController {
 
       // Validation
       if (!title || !contentType) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "Title and content type are required" });
       }
 
+      // Validate title length (max 200 chars per entity)
+      const titleValidation = validateStringLength(title, "Title", 200, 1);
+      if (!titleValidation.isValid) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
+        return res.status(400).json({ error: titleValidation.error });
+      }
+
+      // Validate description length if provided (text field, but reasonable limit)
+      if (description) {
+        const descValidation = validateStringLength(description, "Description", 10000);
+        if (!descValidation.isValid) {
+          await queryRunner.rollbackTransaction();
+          await queryRunner.release();
+          return res.status(400).json({ error: descValidation.error });
+        }
+      }
+
       if (!Object.values(ContentType).includes(contentType as ContentType)) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
         return res.status(400).json({ error: "Invalid content type" });
       }
 
-      if (isPaid === "true" && (!price || parseFloat(price) <= 0)) {
-        return res.status(400).json({ error: "Price is required for paid content" });
+      // Validate price if content is paid
+      if (isPaid === "true" || isPaid === true) {
+        if (!price) {
+          await queryRunner.rollbackTransaction();
+          await queryRunner.release();
+          return res.status(400).json({ error: "Price is required for paid content" });
+        }
+
+        const priceValidation = validatePrice(price, 0, 1000000);
+        if (!priceValidation.isValid) {
+          await queryRunner.rollbackTransaction();
+          await queryRunner.release();
+          return res.status(400).json({ error: priceValidation.error });
+        }
       }
 
-      // Save file
-      const { fileUrl, fileSize } = await fileStorageService.saveFile(
+      // Save file first
+      const fileResult = await fileStorageService.saveFile(
         req.file,
         contentType,
         userId!
       );
+      fileUrl = fileResult.fileUrl;
 
-      // Create content record
-      const content = contentRepository.create({
+      // Create content record within transaction
+      const content = queryRunner.manager.create(Content, {
         teacherId: userId!,
         title,
         description: description || null,
         contentType: contentType as ContentType,
         language: language || "english",
-        fileUrl,
-        fileSize,
+        fileUrl: fileResult.fileUrl,
+        fileSize: fileResult.fileSize,
         thumbnailUrl: thumbnailUrl || null,
         isPaid: isPaid === "true" || isPaid === true,
         price: isPaid === "true" || isPaid === true ? parseFloat(price) : undefined,
@@ -86,21 +134,35 @@ export class ContentController {
         metadata: {},
       });
 
-      await contentRepository.save(content);
+      await queryRunner.manager.save(Content, content);
+      await queryRunner.commitTransaction();
 
       res.status(201).json({
         message: "Content uploaded successfully",
         content,
       });
     } catch (error) {
-      console.error("Content upload error:", error);
+      await queryRunner.rollbackTransaction();
+      
+      // Clean up uploaded file if database save failed
+      if (fileUrl) {
+        try {
+          await fileStorageService.deleteFile(fileUrl);
+        } catch (deleteError) {
+          console.error("Failed to cleanup file after upload error:", deleteError);
+        }
+      }
+      
+      Logger.error("Content upload error:", error, req as Request);
       res.status(500).json({ error: "Failed to upload content" });
+    } finally {
+      await queryRunner.release();
     }
   }
 
   /**
-   * Get all content (with filters)
-   * GET /api/content?teacherId=&type=&subject=&grade=&language=&isPaid=
+   * Get all content (with filters and pagination)
+   * GET /api/content?teacherId=&type=&subject=&grade=&language=&isPaid=&page=&limit=
    */
   static async getAll(req: Request, res: Response) {
     try {
@@ -114,6 +176,9 @@ export class ContentController {
         isPublished,
         search,
       } = req.query;
+
+      // Parse pagination parameters
+      const pagination = parsePagination(req.query, 20, 100);
 
       const queryBuilder = contentRepository
         .createQueryBuilder("content")
@@ -175,9 +240,25 @@ export class ContentController {
 
       queryBuilder.orderBy("content.createdAt", "DESC");
 
+      // Get total count for pagination
+      const totalCount = await queryBuilder.getCount();
+
+      // Apply pagination
+      queryBuilder.skip(pagination.offset).take(pagination.limit);
+
       const contents = await queryBuilder.getMany();
 
-      res.json({ contents });
+      // Create pagination metadata
+      const paginationMeta = createPaginationMeta(
+        pagination.page,
+        pagination.limit,
+        totalCount
+      );
+
+      res.json({
+        contents,
+        pagination: paginationMeta,
+      });
     } catch (error) {
       console.error("Get content error:", error);
       res.status(500).json({ error: "Failed to fetch content" });
@@ -306,13 +387,28 @@ export class ContentController {
         return res.status(403).json({ error: "Not authorized to delete this content" });
       }
 
-      // Delete file from storage
-      await fileStorageService.deleteFile(content.fileUrl);
+      // Delete file from storage (with error handling)
+      let fileDeleted = false;
+      try {
+        await fileStorageService.deleteFile(content.fileUrl);
+        fileDeleted = true;
+      } catch (fileError: any) {
+        // Log error but continue with database deletion
+        console.error("Error deleting file during content deletion:", fileError);
+        // If file doesn't exist, that's okay - continue with DB deletion
+        if (fileError.code !== "ENOENT") {
+          // For other errors, log but don't fail the request
+          console.warn(`File deletion failed for ${content.fileUrl}, but continuing with database deletion`);
+        }
+      }
 
       // Delete content record
       await contentRepository.remove(content);
 
-      res.json({ message: "Content deleted successfully" });
+      res.json({
+        message: "Content deleted successfully",
+        fileDeleted,
+      });
     } catch (error) {
       console.error("Delete content error:", error);
       res.status(500).json({ error: "Failed to delete content" });

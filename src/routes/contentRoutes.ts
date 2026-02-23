@@ -2,15 +2,17 @@ import { Router } from "express";
 import { ContentController } from "../controllers/ContentController";
 import { authenticate, authorize } from "../middleware/authMiddleware";
 import { upload, validateFileSize } from "../middleware/uploadMiddleware";
+import { uploadRateLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
 
-// Upload content (instructor/admin only)
+// Upload content (instructor/admin only) with rate limiting
 router.post(
   "/upload",
+  uploadRateLimiter,
   authorize("instructor", "admin"),
   upload.single("file"),
   validateFileSize,
