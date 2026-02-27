@@ -118,4 +118,8 @@ export class Payment {
   @ManyToOne(() => User)
   @JoinColumn({ name: "recipient_id" })
   recipient?: User;
+
+  // Track if this payment has been paid out
+  @Column({ name: "payout_id", nullable: true })
+  payoutId?: string;
 }

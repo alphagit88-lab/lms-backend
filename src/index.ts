@@ -24,6 +24,11 @@ import { apiRateLimiter } from "./middleware/rateLimiter";
 import { handleSessionExpiration } from "./middleware/sessionMiddleware";
 import { requestIdMiddleware } from "./middleware/requestId";
 import path from "path";
+import sessionRoutes from "./routes/sessionRoutes";
+import paymentRoutes from "./routes/paymentRoutes";
+import { RecordingFetchJob } from "./jobs/RecordingFetchJob";
+import { startPayoutJob } from "./jobs/PayoutJob";
+import { startBookingCleanupJob } from "./jobs/BookingCleanupJob";
 
 dotenv.config();
 
@@ -35,9 +40,29 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || "http://localhost:3000",
   credentials: true,
 }));
+
+app.use(cookieParser());
+
+// Session configuration
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production", // Use HTTPS in production
+      sameSite: "lax",
+      maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"), // 24 hours default
+    },
+  })
+);
+
+// MUST be before express.json() because webhook needs raw buffer
+app.use("/api/payments", paymentRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 // Request ID middleware (should be early in the chain)
 app.use(requestIdMiddleware);
@@ -57,21 +82,6 @@ app.use("/uploads", express.static(uploadDir));
 
 // Data sanitization middleware (removes passwords from responses)
 app.use(sanitizeUserData);
-
-// Session configuration
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // Use HTTPS in production
-      sameSite: "lax",
-      maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"), // 24 hours default
-    },
-  })
-);
 
 // Routes
 app.get("/", (req: Request, res: Response) => {
@@ -95,16 +105,22 @@ app.use("/api/profiles", profileRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/content", contentRoutes);
 app.use("/api/recordings", recordingRoutes);
+app.use("/api/sessions", sessionRoutes);
 app.use("/api", userRoutes);
 
 // Initialize Database and Start Server
 AppDataSource.initialize()
   .then(() => {
     console.log("✓ Database connected successfully");
-    
+
     app.listen(PORT, () => {
       console.log(`✓ Server is running on port ${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+
+      // Start background jobs
+      RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
+      startPayoutJob();
+      startBookingCleanupJob();
     });
   })
   .catch((error) => {

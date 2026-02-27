@@ -25,6 +25,18 @@ export const registerRateLimiter = rateLimit({
 });
 
 /**
+ * Rate limiter for password reset endpoint
+ * Prevents abuse of reset functionality
+ */
+export const passwordResetRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 3, // Limit each IP to 3 reset requests per 15 minutes
+  message: "Too many password reset attempts from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
  * Rate limiter for general API endpoints
  * Prevents abuse and DDoS
  */
