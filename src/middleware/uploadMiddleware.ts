@@ -32,48 +32,85 @@ const ALLOWED_DOCUMENT_TYPES = [
 ];
 const ALLOWED_DOCUMENT_EXTENSIONS = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"];
 
+// All allowed types combined — used in fileFilter so we can accept ANY known
+// valid file at this stage. Per-contentType enforcement happens AFTER multer
+// has parsed req.body (see validateContentType below).
+const ALL_ALLOWED_TYPES = [
+  ...ALLOWED_VIDEO_TYPES,
+  ...ALLOWED_AUDIO_TYPES,
+  ...ALLOWED_DOCUMENT_TYPES,
+];
+const ALL_ALLOWED_EXTENSIONS = [
+  ...ALLOWED_VIDEO_EXTENSIONS,
+  ...ALLOWED_AUDIO_EXTENSIONS,
+  ...ALLOWED_DOCUMENT_EXTENSIONS,
+];
+
 /**
- * File filter function - validates both mimetype AND file extension
- * This prevents mimetype spoofing attacks
+ * File filter function — validates extension and MIME type against the full
+ * set of known valid types.
+ *
+ * NOTE: req.body is NOT yet populated when multer calls this filter for a
+ * multipart/form-data request (body fields are parsed alongside the file
+ * stream). Do NOT read req.body.contentType here — use validateContentType
+ * middleware below instead, which runs AFTER multer has finished parsing.
  */
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const contentType = req.body.contentType || req.query.contentType || "other";
-
-  // Determine allowed types and extensions based on content type
-  let allowedTypes: string[] = [];
-  let allowedExtensions: string[] = [];
-  
-  if (contentType === "video") {
-    allowedTypes = ALLOWED_VIDEO_TYPES;
-    allowedExtensions = ALLOWED_VIDEO_EXTENSIONS;
-  } else if (contentType === "audio") {
-    allowedTypes = ALLOWED_AUDIO_TYPES;
-    allowedExtensions = ALLOWED_AUDIO_EXTENSIONS;
-  } else {
-    allowedTypes = ALLOWED_DOCUMENT_TYPES;
-    allowedExtensions = ALLOWED_DOCUMENT_EXTENSIONS;
-  }
-
-  // Validate file extension
   const fileExtension = path.extname(file.originalname).toLowerCase();
-  if (!allowedExtensions.includes(fileExtension)) {
+
+  if (!ALL_ALLOWED_EXTENSIONS.includes(fileExtension)) {
     return cb(
       new Error(
-        `Invalid file extension. Allowed extensions for ${contentType}: ${allowedExtensions.join(", ")}`
+        `File type not allowed. Supported extensions: ${ALL_ALLOWED_EXTENSIONS.join(", ")}`
       )
     );
   }
 
-  // Validate mimetype (must match extension)
-  if (!allowedTypes.includes(file.mimetype)) {
+  if (!ALL_ALLOWED_TYPES.includes(file.mimetype)) {
     return cb(
       new Error(
-        `Invalid file type. Allowed types for ${contentType}: ${allowedTypes.join(", ")}`
+        `MIME type not allowed: ${file.mimetype}`
       )
     );
   }
 
   cb(null, true);
+};
+
+/**
+ * Middleware: validates that the uploaded file extension matches the declared
+ * contentType from req.body.  Run this AFTER upload.single() so req.body is
+ * fully available.
+ */
+export const validateContentType = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.file) {
+    return next();
+  }
+
+  const contentType = (req.body.contentType as string || "other").toLowerCase();
+  const ext = path.extname(req.file.originalname).toLowerCase();
+
+  const mismatch = (
+    (contentType === "video" && !ALLOWED_VIDEO_EXTENSIONS.includes(ext)) ||
+    (contentType === "audio" && !ALLOWED_AUDIO_EXTENSIONS.includes(ext)) ||
+    (!(["video", "audio"] as string[]).includes(contentType) && !ALLOWED_DOCUMENT_EXTENSIONS.includes(ext))
+  );
+
+  if (mismatch) {
+    const allowed =
+      contentType === "video" ? ALLOWED_VIDEO_EXTENSIONS :
+      contentType === "audio" ? ALLOWED_AUDIO_EXTENSIONS :
+      ALLOWED_DOCUMENT_EXTENSIONS;
+    return res.status(400).json({
+      error: `Invalid file for content type "${contentType}". Allowed extensions: ${allowed.join(", ")}`,
+    });
+  }
+
+  next();
 };
 
 /**

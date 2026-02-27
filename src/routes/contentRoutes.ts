@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { ContentController } from "../controllers/ContentController";
 import { authenticate, authorize } from "../middleware/authMiddleware";
-import { upload, validateFileSize } from "../middleware/uploadMiddleware";
+import { upload, validateFileSize, validateContentType } from "../middleware/uploadMiddleware";
 import { uploadRateLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
@@ -16,6 +16,7 @@ router.post(
   authorize("instructor", "admin"),
   upload.single("file"),
   validateFileSize,
+  validateContentType,
   ContentController.upload
 );
 

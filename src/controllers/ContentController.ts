@@ -58,6 +58,7 @@ export class ContentController {
         grade,
         isDownloadable,
         thumbnailUrl,
+        isPublished,
       } = req.body;
 
       // Validation
@@ -130,7 +131,9 @@ export class ContentController {
         subject: subject || null,
         grade: grade || null,
         isDownloadable: isDownloadable !== "false" && isDownloadable !== false,
-        isPublished: false, // Default to unpublished
+        // Honour the isPublished flag from the request; default to false so
+        // drafts are safe, but allow callers to publish in one step.
+        isPublished: isPublished === "true" || isPublished === true,
         metadata: {},
       });
 
