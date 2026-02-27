@@ -11,6 +11,7 @@ import {
 } from "typeorm";
 import { User } from "./User";
 import { Session } from "./Session";
+import { Course } from "./Course";
 
 @Entity("classes")
 @Index(["teacherId", "isActive"])
@@ -21,6 +22,9 @@ export class Class {
 
   @Column({ name: "teacher_id" })
   teacherId!: string;
+
+  @Column({ name: "course_id", nullable: true })
+  courseId?: string;
 
   @Column({ length: 200 })
   subject!: string;
@@ -65,6 +69,10 @@ export class Class {
   @ManyToOne(() => User, { onDelete: "CASCADE" })
   @JoinColumn({ name: "teacher_id" })
   teacher!: User;
+
+  @ManyToOne(() => Course, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "course_id" })
+  course?: Course;
 
   @OneToMany(() => Session, (session) => session.class)
   sessions!: Session[];

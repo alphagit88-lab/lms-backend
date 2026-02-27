@@ -1,10 +1,10 @@
-import { 
-  Entity, 
-  PrimaryGeneratedColumn, 
-  Column, 
-  CreateDateColumn, 
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
   UpdateDateColumn,
-  OneToMany 
+  OneToMany
 } from "typeorm";
 import { Course } from "./Course";
 import { Enrollment } from "./Enrollment";
@@ -59,6 +59,12 @@ export class User {
 
   @Column({ name: "last_login_at", type: "timestamp", nullable: true })
   lastLoginAt?: Date;
+
+  @Column({ name: "password_reset_token", length: 255, nullable: true, select: false })
+  passwordResetToken?: string;
+
+  @Column({ name: "password_reset_expires", type: "timestamp", nullable: true })
+  passwordResetExpires?: Date;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;

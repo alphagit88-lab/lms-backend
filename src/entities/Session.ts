@@ -11,6 +11,7 @@ import {
 } from "typeorm";
 import { Class } from "./Class";
 import { Recording } from "./Recording";
+import { Booking } from "./Booking";
 
 export enum SessionType {
   LIVE = "live",
@@ -32,8 +33,11 @@ export class Session {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ name: "class_id" })
-  classId!: string;
+  @Column({ name: "class_id", nullable: true })
+  classId?: string;
+
+  @Column({ name: "booking_id", nullable: true })
+  bookingId?: string;
 
   @Column({ length: 200 })
   title!: string;
@@ -89,9 +93,13 @@ export class Session {
   updatedAt!: Date;
 
   // Relationships
-  @ManyToOne(() => Class, (classEntity) => classEntity.sessions, { onDelete: "CASCADE" })
+  @ManyToOne(() => Class, (classEntity) => classEntity.sessions, { onDelete: "CASCADE", nullable: true })
   @JoinColumn({ name: "class_id" })
-  class!: Class;
+  class?: Class;
+
+  @OneToOne(() => Booking, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "booking_id" })
+  booking?: Booking;
 
   @OneToOne(() => Recording, (recording) => recording.session)
   recording?: Recording;

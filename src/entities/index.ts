@@ -2,6 +2,9 @@
 export { User } from "./User";
 export { Category } from "./Category";
 
+// Payouts
+export * from "./Payout";
+
 // Course-related entities
 export { Course } from "./Course";
 export { Lesson } from "./Lesson";
