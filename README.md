@@ -86,4 +86,12 @@ DB_USERNAME=postgres
 DB_PASSWORD=your_password
 DB_DATABASE=lms_db
 CORS_ORIGIN=http://localhost:3000
+SESSION_SECRET=long_random_secret
+UPLOAD_DIR=./uploads
+
+# Zoom Server-to-Server OAuth (https://marketplace.zoom.us/)
+# Required scopes: meeting:write, recording:read
+ZOOM_ACCOUNT_ID=your_zoom_account_id
+ZOOM_CLIENT_ID=your_zoom_client_id
+ZOOM_CLIENT_SECRET=your_zoom_client_secret
 ```
