@@ -7,7 +7,9 @@ import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { TeacherProfile } from "../entities/TeacherProfile";
 import { Payment, PaymentStatus } from "../entities/Payment";
 import { User } from "../entities/User";
+import { Session, SessionType, SessionStatus } from "../entities/Session";
 import { QueryRunner } from "typeorm";
+import ZoomService from "../services/ZoomService";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
 import { Logger } from "../utils/logger";
 
@@ -34,6 +36,74 @@ function calculateRefundPercentage(
 }
 
 export class BookingController {
+  /**
+   * Helper to create a Zoom meeting and Session record for a confirmed booking
+   */
+  private static createZoomMeetingForBooking = async (
+    booking: Booking,
+    teacherName: string,
+    queryRunner?: QueryRunner
+  ): Promise<void> => {
+    try {
+      const duration = Math.round(
+        (booking.sessionEndTime.getTime() - booking.sessionStartTime.getTime()) / (1000 * 60)
+      );
+
+      const zoomResponse = await ZoomService.createMeeting({
+        topic: `${teacherName} - ${booking.notes || 'Tutoring Session'}`,
+        startTime: booking.sessionStartTime,
+        duration: duration,
+      });
+
+      // Update booking with Zoom details
+      booking.meetingLink = zoomResponse.joinUrl;
+      booking.meetingId = zoomResponse.meetingId;
+      booking.meetingPassword = zoomResponse.password;
+
+      if (queryRunner) {
+        await queryRunner.manager.save(Booking, booking);
+      } else {
+        await AppDataSource.getRepository(Booking).save(booking);
+      }
+
+      // Create Session record
+      if (queryRunner) {
+        const session = queryRunner.manager.create(Session, {
+          bookingId: booking.id,
+          title: `${teacherName} - ${booking.notes || 'Tutoring Session'}`,
+          startTime: booking.sessionStartTime,
+          endTime: booking.sessionEndTime,
+          sessionType: SessionType.LIVE,
+          status: SessionStatus.SCHEDULED,
+          meetingLink: zoomResponse.joinUrl,
+          meetingId: zoomResponse.meetingId,
+          meetingPassword: zoomResponse.password,
+        });
+        await queryRunner.manager.save(Session, session);
+      } else {
+        const sessionRepo = AppDataSource.getRepository(Session);
+        const session = sessionRepo.create({
+          bookingId: booking.id,
+          title: `${teacherName} - ${booking.notes || 'Tutoring Session'}`,
+          startTime: booking.sessionStartTime,
+          endTime: booking.sessionEndTime,
+          sessionType: SessionType.LIVE,
+          status: SessionStatus.SCHEDULED,
+          meetingLink: zoomResponse.joinUrl,
+          meetingId: zoomResponse.meetingId,
+          meetingPassword: zoomResponse.password,
+        });
+        await sessionRepo.save(session);
+      }
+
+      Logger.info(`Created Zoom meeting and session for booking ${booking.id}`);
+    } catch (error) {
+      Logger.error(`Failed to create Zoom meeting for booking ${booking.id}`, error);
+      // We don't throw here to ensure the booking confirmation itself isn't rolled back
+      // if Zoom API is down, but we record the failure.
+    }
+  };
+
   // Create a booking (Student or Parent)
   static createBooking = async (req: Request, res: Response): Promise<Response> => {
     const queryRunner = AppDataSource.createQueryRunner();
@@ -152,6 +222,13 @@ export class BookingController {
       const shouldAutoConfirm = teacherProfile?.autoConfirmBookings === true;
 
       // Create the booking
+      // Story 2.7: Set PENDING_PAYMENT with a 10-minute expiry for paid slots
+      const isPaid = slot.price && Number(slot.price) > 0;
+      const finalStatus = shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
+      const initialStatus = isPaid ? BookingStatus.PENDING_PAYMENT : finalStatus;
+
+      const paymentExpiresAt = isPaid ? new Date(Date.now() + 10 * 60 * 1000) : undefined;
+
       const booking = queryRunner.manager.create(Booking, {
         slotId,
         studentId: actualStudentId,
@@ -161,7 +238,8 @@ export class BookingController {
         sessionEndTime: slot.endTime,
         notes,
         amount: slot.price,
-        status: shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING,
+        status: initialStatus,
+        paymentExpiresAt,
       });
 
       await queryRunner.manager.save(Booking, booking);
@@ -175,11 +253,19 @@ export class BookingController {
 
       await queryRunner.commitTransaction();
 
-      const message = shouldAutoConfirm
-        ? "Booking created and auto-confirmed"
-        : "Booking created successfully";
+      if (!isPaid && shouldAutoConfirm) {
+        const teacher = await AppDataSource.getRepository(User).findOne({ where: { id: slot.teacherId } });
+        const teacherName = teacher ? `${teacher.firstName} ${teacher.lastName}` : "Teacher";
+        await BookingController.createZoomMeetingForBooking(booking, teacherName);
+      }
 
-      return res.status(201).json({ message, booking, autoConfirmed: shouldAutoConfirm });
+      const message = isPaid
+        ? "Booking pending payment"
+        : shouldAutoConfirm
+          ? "Booking created and auto-confirmed"
+          : "Booking created successfully";
+
+      return res.status(201).json({ message, booking, autoConfirmed: !isPaid && shouldAutoConfirm });
     } catch (error: any) {
       await queryRunner.rollbackTransaction();
       console.error("Error creating booking:", error);
@@ -319,7 +405,10 @@ export class BookingController {
       const { meetingLink } = req.body;
 
       const bookingRepository = AppDataSource.getRepository(Booking);
-      const booking = await bookingRepository.findOne({ where: { id, teacherId } });
+      const booking = await bookingRepository.findOne({
+        where: { id, teacherId },
+        relations: ["teacher"]
+      });
 
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
@@ -332,9 +421,12 @@ export class BookingController {
       booking.status = BookingStatus.CONFIRMED;
       if (meetingLink) {
         booking.meetingLink = meetingLink;
+        await bookingRepository.save(booking);
+      } else {
+        // Automatically create Zoom meeting if no link provided
+        const teacherName = booking.teacher ? `${booking.teacher.firstName} ${booking.teacher.lastName}` : "Teacher";
+        await BookingController.createZoomMeetingForBooking(booking, teacherName);
       }
-
-      await bookingRepository.save(booking);
 
       return res.json({ message: "Booking confirmed successfully", booking });
     } catch (error: any) {
@@ -402,8 +494,8 @@ export class BookingController {
             refundPercentage === 100
               ? PaymentStatus.REFUNDED
               : refundPercentage > 0
-              ? PaymentStatus.PARTIALLY_REFUNDED
-              : payment.paymentStatus; // keep original if 0% refund
+                ? PaymentStatus.PARTIALLY_REFUNDED
+                : payment.paymentStatus; // keep original if 0% refund
           await paymentRepository.save(payment);
         }
       }
@@ -488,10 +580,10 @@ export class BookingController {
           cancelledByTeacher
             ? "Teacher-initiated cancellation — 100% refund"
             : hoursBeforeSession >= 24
-            ? "24+ hours before session — 100% refund"
-            : hoursBeforeSession >= 6
-            ? "6–24 hours before session — 50% refund"
-            : "Less than 6 hours before session — no refund",
+              ? "24+ hours before session — 100% refund"
+              : hoursBeforeSession >= 6
+                ? "6–24 hours before session — 50% refund"
+                : "Less than 6 hours before session — no refund",
       });
     } catch (error: any) {
       console.error("Error fetching cancellation policy:", error);
@@ -658,6 +750,10 @@ export class BookingController {
       const bookings: Booking[] = [];
       const pricePerSession = Math.round((finalPrice / slots.length) * 100) / 100;
 
+      const isPaidPackage = finalPrice > 0;
+      const initialStatus = isPaidPackage ? BookingStatus.PENDING_PAYMENT : (shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING);
+      const paymentExpiresAt = isPaidPackage ? new Date(Date.now() + 10 * 60 * 1000) : undefined;
+
       for (let i = 0; i < slots.length; i++) {
         const slot = slots[i];
 
@@ -671,7 +767,8 @@ export class BookingController {
           notes,
           amount: pricePerSession,
           packageId: savedPackage.id,
-          status: shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING,
+          status: initialStatus,
+          paymentExpiresAt,
         });
 
         const savedBooking = await queryRunner.manager.save(Booking, booking);
