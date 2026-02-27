@@ -13,6 +13,7 @@ import { AvailabilitySlot } from "./AvailabilitySlot";
 import { BookingPackage } from "./BookingPackage";
 
 export enum BookingStatus {
+  PENDING_PAYMENT = "pending_payment",
   PENDING = "pending",
   CONFIRMED = "confirmed",
   CANCELLED = "cancelled",
@@ -72,6 +73,12 @@ export class Booking {
   @Column({ name: "meeting_link", length: 500, nullable: true })
   meetingLink?: string;
 
+  @Column({ name: "meeting_id", length: 255, nullable: true })
+  meetingId?: string;
+
+  @Column({ name: "meeting_password", length: 100, nullable: true })
+  meetingPassword?: string;
+
   @Column({ name: "reminder_sent", default: false })
   reminderSent!: boolean;
 
@@ -89,6 +96,9 @@ export class Booking {
 
   @Column({ name: "package_id", nullable: true, comment: "FK to booking_packages for multi-session bookings" })
   packageId?: string;
+
+  @Column({ name: "payment_expires_at", type: "timestamp", nullable: true })
+  paymentExpiresAt?: Date;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt!: Date;

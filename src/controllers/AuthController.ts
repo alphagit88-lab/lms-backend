@@ -1,6 +1,10 @@
 import "../types/express-session";
 import { Request, Response } from "express";
 import { AuthService } from "../services/AuthService";
+import { AppDataSource } from "../config/data-source";
+import { User } from "../entities/User";
+import path from "path";
+import fs from "fs";
 
 const authService = new AuthService();
 
@@ -239,6 +243,79 @@ export class AuthController {
   }
 
   /**
+   * Forgot password - request a reset token
+   * POST /api/auth/forgot-password
+   */
+  static async forgotPassword(req: Request, res: Response) {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
+      // Email format validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email format" });
+      }
+
+      const result = await authService.forgotPassword(email);
+
+      // Always return 200 to avoid revealing whether an email exists
+      res.json(result);
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ error: "Failed to process password reset request" });
+    }
+  }
+
+  /**
+   * Reset password with token
+   * POST /api/auth/reset-password
+   */
+  static async resetPassword(req: Request, res: Response) {
+    try {
+      const { email, token, newPassword } = req.body;
+
+      // Validation
+      if (!email || !token || !newPassword) {
+        return res.status(400).json({
+          error: "Email, token, and new password are required",
+        });
+      }
+
+      if (newPassword.length < 8) {
+        return res
+          .status(400)
+          .json({ error: "New password must be at least 8 characters long" });
+      }
+
+      // Password complexity validation
+      const hasUpperCase = /[A-Z]/.test(newPassword);
+      const hasLowerCase = /[a-z]/.test(newPassword);
+      const hasNumber = /[0-9]/.test(newPassword);
+      const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword);
+
+      if (!hasUpperCase || !hasLowerCase || !hasNumber || !hasSpecialChar) {
+        return res.status(400).json({
+          error: "New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        });
+      }
+
+      const result = await authService.resetPassword(email, token, newPassword);
+
+      res.json(result);
+    } catch (error: any) {
+      if (error.message === "Invalid or expired reset token") {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Reset password error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  }
+
+  /**
    * Check authentication status
    * GET /api/auth/status
    */
@@ -249,5 +326,92 @@ export class AuthController {
       userEmail: req.session.userEmail || null,
       userRole: req.session.userRole || null,
     });
+  }
+
+  /**
+   * Upload profile picture
+   * POST /api/auth/profile-picture
+   */
+  static async uploadProfilePicture(req: Request, res: Response) {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
+
+      const userRepo = AppDataSource.getRepository(User);
+      const user = await userRepo.findOne({ where: { id: req.session.userId } });
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Delete old profile picture file if it exists
+      if (user.profilePicture) {
+        const oldPath = path.join(process.cwd(), user.profilePicture.replace(/^\//, ""));
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+        }
+      }
+
+      // Save new path  (e.g. "/uploads/profile-pictures/uuid.jpg")
+      const relativePath = `/uploads/profile-pictures/${req.file.filename}`;
+      user.profilePicture = relativePath;
+      await userRepo.save(user);
+
+      // Return the updated user (without password)
+      const { password: _, ...safeUser } = user as any;
+
+      res.json({
+        message: "Profile picture updated successfully",
+        user: safeUser,
+      });
+    } catch (error) {
+      console.error("Upload profile picture error:", error);
+      res.status(500).json({ error: "Failed to upload profile picture" });
+    }
+  }
+
+  /**
+   * Delete profile picture
+   * DELETE /api/auth/profile-picture
+   */
+  static async deleteProfilePicture(req: Request, res: Response) {
+    try {
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const userRepo = AppDataSource.getRepository(User);
+      const user = await userRepo.findOne({ where: { id: req.session.userId } });
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Delete the file from disk
+      if (user.profilePicture) {
+        const filePath = path.join(process.cwd(), user.profilePicture.replace(/^\//, ""));
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      user.profilePicture = undefined;
+      await userRepo.save(user);
+
+      const { password: _, ...safeUser } = user as any;
+
+      res.json({
+        message: "Profile picture removed",
+        user: safeUser,
+      });
+    } catch (error) {
+      console.error("Delete profile picture error:", error);
+      res.status(500).json({ error: "Failed to delete profile picture" });
+    }
   }
 }
