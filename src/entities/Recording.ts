@@ -17,8 +17,8 @@ export class Recording {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ name: "session_id", unique: true })
-  sessionId!: string;
+  @Column({ name: "session_id", unique: true, nullable: true })
+  sessionId!: string | null;
 
   @Column({ name: "file_url", length: 500 })
   fileUrl!: string;

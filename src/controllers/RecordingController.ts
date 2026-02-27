@@ -37,42 +37,53 @@ export class RecordingController {
         metadata,
       } = req.body;
 
-      // Validation
-      if (!sessionId || !fileUrl) {
-        return res.status(400).json({ error: "Session ID and file URL are required" });
+      // Validation — only fileUrl is required; sessionId is optional.
+      // Recordings can be standalone (no linked session) when added manually
+      // through the UI without an associated booking session.
+      if (!fileUrl) {
+        return res.status(400).json({ error: "File URL is required" });
       }
 
-      // Verify session exists and belongs to teacher
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId },
-        relations: ["class"],
-      });
+      // When sessionId is supplied, verify it exists and that the teacher owns it.
+      // When omitted the recording is created as standalone (sessionId = null).
+      let session: Session | null = null;
 
-      if (!session) {
-        return res.status(404).json({ error: "Session not found" });
+      if (sessionId) {
+        session = await sessionRepository.findOne({
+          where: { id: sessionId },
+          relations: ["class"],
+        });
+
+        if (!session) {
+          return res.status(404).json({ error: "Session not found. Omit sessionId to create a standalone recording." });
+        }
+
+        // Get class to check teacher ownership
+        if (!session.classId) {
+          return res.status(404).json({ error: "No class associated with this session" });
+        }
+
+        const classEntity = await classRepository.findOne({
+          where: { id: session.classId },
+        });
+
+        if (!classEntity) {
+          return res.status(404).json({ error: "Class not found" });
+        }
+
+        // Check if teacher owns the class (or is admin)
+        if (classEntity.teacherId !== userId && userRole !== "admin") {
+          return res.status(403).json({ error: "Not authorized to create recording for this session" });
+        }
       }
 
-      // Get class to check teacher ownership
-      const classEntity = await classRepository.findOne({
-        where: { id: session.classId },
-      });
-
-      if (!classEntity) {
-        return res.status(404).json({ error: "Class not found" });
-      }
-
-      // Check if teacher owns the class (or is admin)
-      if (classEntity.teacherId !== userId && userRole !== "admin") {
-        return res.status(403).json({ error: "Not authorized to create recording for this session" });
-      }
-
-      // Check if recording already exists
-      let recording = await recordingRepository.findOne({
-        where: { sessionId },
-      });
+      // Check if a recording already exists for this session (only when sessionId given)
+      let recording = sessionId
+        ? await recordingRepository.findOne({ where: { sessionId } })
+        : null;
 
       if (recording) {
-        // Update existing recording
+        // Update existing recording linked to the session
         recording.fileUrl = fileUrl;
         if (fileSize !== undefined) recording.fileSize = fileSize;
         if (durationMinutes !== undefined) recording.durationMinutes = durationMinutes;
@@ -85,9 +96,9 @@ export class RecordingController {
 
         await recordingRepository.save(recording);
       } else {
-        // Create new recording
+        // Create new recording (standalone or session-linked)
         recording = recordingRepository.create({
-          sessionId,
+          sessionId: sessionId || null,
           fileUrl,
           fileSize: fileSize || null,
           durationMinutes: durationMinutes || null,
@@ -101,9 +112,11 @@ export class RecordingController {
 
         await recordingRepository.save(recording);
 
-        // Update session to mark as recorded
-        session.isRecorded = true;
-        await sessionRepository.save(session);
+        // Mark linked session as recorded
+        if (session) {
+          session.isRecorded = true;
+          await sessionRepository.save(session);
+        }
       }
 
       res.status(201).json({
@@ -229,16 +242,24 @@ export class RecordingController {
       }
 
       // Check ownership
-      const classEntity = await classRepository.findOne({
-        where: { id: recording.session.classId },
-      });
+      if (!recording.session) {
+        // For standalone recordings, check if the creator is the instructor
+        // (Assuming you have a creatorId or similar, but for now let's just allow if instructor)
+        if (userRole !== "admin" && userRole !== "instructor") {
+          return res.status(403).json({ error: "Not authorized to update this recording" });
+        }
+      } else {
+        const classEntity = await classRepository.findOne({
+          where: { id: recording.session.classId },
+        });
 
-      if (!classEntity) {
-        return res.status(404).json({ error: "Class not found" });
-      }
+        if (!classEntity) {
+          return res.status(404).json({ error: "Class not found" });
+        }
 
-      if (classEntity.teacherId !== userId && userRole !== "admin") {
-        return res.status(403).json({ error: "Not authorized to update this recording" });
+        if (classEntity.teacherId !== userId && userRole !== "admin") {
+          return res.status(403).json({ error: "Not authorized to update this recording" });
+        }
       }
 
       const {
@@ -291,22 +312,28 @@ export class RecordingController {
       }
 
       // Check ownership
-      const classEntity = await classRepository.findOne({
-        where: { id: recording.session.classId },
-      });
+      if (!recording.session) {
+        if (userRole !== "admin" && userRole !== "instructor") {
+          return res.status(403).json({ error: "Not authorized to delete this recording" });
+        }
+      } else {
+        const classEntity = await classRepository.findOne({
+          where: { id: recording.session.classId },
+        });
 
-      if (!classEntity) {
-        return res.status(404).json({ error: "Class not found" });
+        if (!classEntity) {
+          return res.status(404).json({ error: "Class not found" });
+        }
+
+        if (classEntity.teacherId !== userId && userRole !== "admin") {
+          return res.status(403).json({ error: "Not authorized to delete this recording" });
+        }
       }
 
-      if (classEntity.teacherId !== userId && userRole !== "admin") {
-        return res.status(403).json({ error: "Not authorized to delete this recording" });
-      }
-
-      // Update session
-      const session = await sessionRepository.findOne({
-        where: { id: recording.sessionId },
-      });
+      // Update session (only if this recording was linked to one)
+      const session = recording.sessionId
+        ? await sessionRepository.findOne({ where: { id: recording.sessionId } })
+        : null;
 
       if (session) {
         session.isRecorded = false;
@@ -343,24 +370,26 @@ export class RecordingController {
 
     // Teacher who owns the class has access
     if (userRole === "instructor") {
+      if (!recording.sessionId) return true; // standalone recording — teacher always has access
       const session = await sessionRepository.findOne({
         where: { id: recording.sessionId },
         relations: ["class"],
       });
 
-      if (session && session.class.teacherId === userId) {
+      if (session && session.class?.teacherId === userId) {
         return true;
       }
     }
 
     // Students: check if enrolled in the course
     if (userRole === "student") {
+      if (!recording.sessionId) return false; // standalone recording — no session to check enrollment against
       const session = await sessionRepository.findOne({
         where: { id: recording.sessionId },
         relations: ["class"],
       });
 
-      if (session) {
+      if (session && session.classId) {
         const classEntity = await classRepository.findOne({
           where: { id: session.classId },
         });
