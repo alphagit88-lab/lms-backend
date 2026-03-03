@@ -5,14 +5,21 @@ import { User } from "../entities/User";
 import { Course } from "../entities/Course";
 import { Booking } from "../entities/Booking";
 import { Payout, PayoutStatus } from "../entities/Payout";
+import { Payment } from "../entities/Payment";
+import { Enrollment } from "../entities/Enrollment";
+import { StudentParent, LinkStatus } from "../entities/StudentParent";
 
 const userRepository = AppDataSource.getRepository(User);
 const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
 const courseRepository = AppDataSource.getRepository(Course);
 const bookingRepository = AppDataSource.getRepository(Booking);
+const paymentRepository = AppDataSource.getRepository(Payment);
+const enrollmentRepository = AppDataSource.getRepository(Enrollment);
+const studentParentRepository = AppDataSource.getRepository(StudentParent);
 
 export class AdminController {
   /* ─── Platform Stats ───────────────────────────────── */
+  // ... (trimmed for tool input, I will use multi_replace if needed but let's try a single replacement of the export class part)
 
   /**
    * GET /api/admin/stats
@@ -334,6 +341,157 @@ export class AdminController {
     } catch (error) {
       console.error("Process payout error:", error);
       res.status(500).json({ error: "Failed to process payout" });
+    }
+  }
+
+  /* ─── Payment & Enrollment Management ──────────────── */
+
+  /**
+   * GET /api/admin/payments
+   */
+  static async getPayments(req: Request, res: Response) {
+    try {
+      const { page = "1", limit = "20", status } = req.query;
+      const qb = paymentRepository.createQueryBuilder("p")
+        .leftJoinAndSelect("p.student", "student")
+        .leftJoinAndSelect("p.course", "course");
+
+      if (status) {
+        qb.andWhere("p.status = :status", { status });
+      }
+
+      const pageNum = parseInt(page as string, 10);
+      const pageSize = parseInt(limit as string, 10);
+
+      const [payments, total] = await qb
+        .orderBy("p.createdAt", "DESC")
+        .skip((pageNum - 1) * pageSize)
+        .take(pageSize)
+        .getManyAndCount();
+
+      res.json({
+        payments,
+        total,
+        page: pageNum,
+        totalPages: Math.ceil(total / pageSize)
+      });
+    } catch (error) {
+      console.error("Get payments error:", error);
+      res.status(500).json({ error: "Failed to fetch payments" });
+    }
+  }
+
+  /**
+   * GET /api/admin/enrollments
+   */
+  static async getEnrollments(req: Request, res: Response) {
+    try {
+      const { page = "1", limit = "20" } = req.query;
+      const pageNum = parseInt(page as string, 10);
+      const pageSize = parseInt(limit as string, 10);
+
+      const [enrollments, total] = await enrollmentRepository.findAndCount({
+        relations: ["student", "course"],
+        order: { enrolledAt: "DESC" },
+        skip: (pageNum - 1) * pageSize,
+        take: pageSize
+      });
+
+      res.json({
+        enrollments,
+        total,
+        page: pageNum,
+        totalPages: Math.ceil(total / pageSize)
+      });
+    } catch (error) {
+      console.error("Get enrollments error:", error);
+      res.status(500).json({ error: "Failed to fetch enrollments" });
+    }
+  }
+
+  /* ─── Parent Management ───────────────────────────── */
+
+  /**
+   * GET /api/admin/parent-links
+   */
+  static async getParentLinks(req: Request, res: Response) {
+    try {
+      const { page = "1", limit = "20" } = req.query;
+      const pageNum = parseInt(page as string, 10);
+      const pageSize = parseInt(limit as string, 10);
+
+      const [links, total] = await studentParentRepository.findAndCount({
+        relations: ["student", "parent"],
+        order: { createdAt: "DESC" },
+        skip: (pageNum - 1) * pageSize,
+        take: pageSize
+      });
+
+      res.json({
+        links,
+        total,
+        page: pageNum,
+        totalPages: Math.ceil(total / pageSize)
+      });
+    } catch (error) {
+      console.error("Get parent links error:", error);
+      res.status(500).json({ error: "Failed to fetch parent links" });
+    }
+  }
+
+  /**
+   * POST /api/admin/parent-links
+   */
+  static async createParentLink(req: Request, res: Response) {
+    try {
+      const { studentId, parentId, status = LinkStatus.ACCEPTED } = req.body;
+
+      if (!studentId || !parentId) {
+        return res.status(400).json({ error: "studentId and parentId are required" });
+      }
+
+      // Check if users exist
+      const student = await userRepository.findOne({ where: { id: studentId, role: "student" } });
+      const parent = await userRepository.findOne({ where: { id: parentId, role: "parent" } });
+
+      if (!student) return res.status(404).json({ error: "Student not found" });
+      if (!parent) return res.status(404).json({ error: "Parent not found" });
+
+      // Check if link exists
+      const existing = await studentParentRepository.findOne({ where: { studentId, parentId } });
+      if (existing) return res.status(409).json({ error: "Link already exists" });
+
+      const link = studentParentRepository.create({
+        studentId,
+        parentId,
+        status: status as LinkStatus,
+        acceptedAt: status === LinkStatus.ACCEPTED ? new Date() : undefined
+      });
+
+      await studentParentRepository.save(link);
+
+      res.status(201).json({ message: "Parent-student link created successfully", link });
+    } catch (error) {
+      console.error("Create parent link error:", error);
+      res.status(500).json({ error: "Failed to create parent link" });
+    }
+  }
+
+  /**
+   * DELETE /api/admin/parent-links/:id
+   */
+  static async removeParentLink(req: Request, res: Response) {
+    try {
+      const linkId = req.params.id as string;
+      const link = await studentParentRepository.findOne({ where: { id: linkId } });
+
+      if (!link) return res.status(404).json({ error: "Link not found" });
+
+      await studentParentRepository.remove(link);
+      res.json({ message: "Link removed successfully" });
+    } catch (error) {
+      console.error("Remove parent link error:", error);
+      res.status(500).json({ error: "Failed to remove link" });
     }
   }
 }

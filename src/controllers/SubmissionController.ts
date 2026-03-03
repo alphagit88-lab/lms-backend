@@ -182,4 +182,91 @@ export class SubmissionController {
             return res.status(500).json({ error: "Failed to fetch history." });
         }
     };
+
+    /**
+     * Save Draft — Auto-save answers without finalizing
+     * POST /api/submissions/exam/:examId/save-draft
+     */
+    static saveDraft = async (req: Request, res: Response): Promise<Response> => {
+        try {
+            const examId = req.params.examId as string;
+            const studentId = req.session.userId!;
+            const { answers } = req.body;
+
+            const examRepo = AppDataSource.getRepository(Exam);
+            const exam = await examRepo.findOne({ where: { id: examId } });
+
+            if (!exam) return res.status(404).json({ error: "Exam not found." });
+            if (!exam.isPublished) return res.status(403).json({ error: "Exam is not published." });
+
+            const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
+
+            // Determine current attempt number
+            const pastSubmissions = await submissionRepo.find({
+                where: { examId, studentId, questionId: IsNull() }
+            });
+            const attemptNumber = pastSubmissions.length > 0
+                ? Math.max(...pastSubmissions.map(s => s.attemptNumber)) + 1
+                : 1;
+
+            // Check if we already have a draft for this attempt
+            let existingDraft = await submissionRepo.findOne({
+                where: { examId, studentId, status: SubmissionStatus.DRAFT, questionId: IsNull() }
+            });
+
+            if (!existingDraft) {
+                // Create a new master draft record
+                existingDraft = submissionRepo.create({
+                    examId,
+                    studentId,
+                    attemptNumber,
+                    status: SubmissionStatus.DRAFT,
+                    metadata: { lastSavedAt: new Date().toISOString() }
+                });
+                await submissionRepo.save(existingDraft);
+            } else {
+                existingDraft.metadata = { ...existingDraft.metadata, lastSavedAt: new Date().toISOString() };
+                await submissionRepo.save(existingDraft);
+            }
+
+            // Save/update individual answers
+            for (const ans of (answers || [])) {
+                let existing = await submissionRepo.findOne({
+                    where: {
+                        examId,
+                        studentId,
+                        questionId: ans.questionId,
+                        attemptNumber: existingDraft.attemptNumber,
+                        status: SubmissionStatus.DRAFT
+                    }
+                });
+
+                if (existing) {
+                    existing.answerText = ans.answerText;
+                    existing.uploadUrl = ans.uploadUrl;
+                    await submissionRepo.save(existing);
+                } else {
+                    const newAnswer = submissionRepo.create({
+                        examId,
+                        questionId: ans.questionId,
+                        studentId,
+                        attemptNumber: existingDraft.attemptNumber,
+                        answerText: ans.answerText,
+                        uploadUrl: ans.uploadUrl,
+                        status: SubmissionStatus.DRAFT
+                    });
+                    await submissionRepo.save(newAnswer);
+                }
+            }
+
+            return res.json({
+                message: "Draft saved successfully.",
+                draftId: existingDraft.id,
+                savedAt: new Date().toISOString()
+            });
+        } catch (error) {
+            Logger.error("Error saving draft:", error);
+            return res.status(500).json({ error: "Failed to save draft." });
+        }
+    };
 }
