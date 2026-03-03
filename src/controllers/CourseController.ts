@@ -109,7 +109,7 @@ export class CourseController {
 
       const course = await courseRepository.findOne({
         where: { id },
-        relations: ["instructor", "category", "lessons", "enrollments"],
+        relations: ["instructor", "category", "lessons", "enrollments", "exams"],
       });
 
       if (!course) {
