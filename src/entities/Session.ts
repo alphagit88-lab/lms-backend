@@ -11,6 +11,7 @@ import {
 } from "typeorm";
 import { Class } from "./Class";
 import { Recording } from "./Recording";
+import { User } from "./User";
 import { Booking } from "./Booking";
 
 export enum SessionType {
@@ -103,4 +104,11 @@ export class Session {
 
   @OneToOne(() => Recording, (recording) => recording.session)
   recording?: Recording;
+
+  @Column({ name: "teacher_id", nullable: true })
+  teacherId?: string;
+
+  @ManyToOne(() => User, undefined, { onDelete: "CASCADE", nullable: true })
+  @JoinColumn({ name: "teacher_id" })
+  teacher?: User;
 }
