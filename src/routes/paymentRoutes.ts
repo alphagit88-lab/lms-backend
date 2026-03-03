@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/authMiddleware";
+import { authenticate, authorize } from "../middleware/authMiddleware";
 import express from "express";
 import { paymentController } from "../controllers/PaymentController";
 
@@ -20,5 +20,14 @@ router.post(
 router.get("/history", authenticate, paymentController.getMyPayments);
 router.get("/transactions", authenticate, paymentController.getTransactions);
 router.get("/earnings", authenticate, paymentController.getTeacherEarnings);
+
+// Manual payment confirmation (Admin only — for dev/localhost use)
+router.post(
+    "/:paymentId/confirm",
+    authenticate,
+    authorize("admin"),
+    express.json(),
+    paymentController.manualConfirm
+);
 
 export default router;

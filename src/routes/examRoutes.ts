@@ -15,6 +15,13 @@ router.post(
     ExamController.createExam
 );
 
+// Get all published exams for a student across their enrolled courses
+router.get(
+    "/student/available",
+    authenticate,
+    ExamController.getStudentAvailableExams
+);
+
 // Get all exams for current instructor
 router.get(
     "/my-exams",
@@ -35,6 +42,14 @@ router.get(
     "/:id",
     authenticate,
     ExamController.getExamById
+);
+
+// Get aggregate statistics for an exam (instructor)
+router.get(
+    "/:id/stats",
+    authenticate,
+    authorize("instructor", "admin"),
+    ExamController.getExamStats
 );
 
 // Update an exam Details

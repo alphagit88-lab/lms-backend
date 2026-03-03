@@ -25,4 +25,13 @@ router.patch("/teachers/:id/reject", AdminController.rejectTeacher);
 router.get("/payouts", AdminController.getPayouts);
 router.post("/payouts/:id/process", AdminController.processPayout);
 
+// Payments & Enrollments
+router.get("/payments", AdminController.getPayments);
+router.get("/enrollments", AdminController.getEnrollments);
+
+// Parent Management
+router.get("/parent-links", AdminController.getParentLinks);
+router.post("/parent-links", AdminController.createParentLink);
+router.delete("/parent-links/:id", AdminController.removeParentLink);
+
 export default router;
