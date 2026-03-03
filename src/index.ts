@@ -26,6 +26,10 @@ import { requestIdMiddleware } from "./middleware/requestId";
 import path from "path";
 import sessionRoutes from "./routes/sessionRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
+import examRoutes from "./routes/examRoutes";
+import questionRoutes from "./routes/questionRoutes";
+import submissionRoutes from "./routes/submissionRoutes";
+import gradingRoutes from "./routes/gradingRoutes";
 import { RecordingFetchJob } from "./jobs/RecordingFetchJob";
 import { startPayoutJob } from "./jobs/PayoutJob";
 import { startBookingCleanupJob } from "./jobs/BookingCleanupJob";
@@ -106,6 +110,10 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/content", contentRoutes);
 app.use("/api/recordings", recordingRoutes);
 app.use("/api/sessions", sessionRoutes);
+app.use("/api/exams", examRoutes);
+app.use("/api/questions", questionRoutes);
+app.use("/api/submissions", submissionRoutes);
+app.use("/api/grading", gradingRoutes);
 app.use("/api", userRoutes);
 
 // Initialize Database and Start Server

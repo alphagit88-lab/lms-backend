@@ -26,9 +26,9 @@ export class SessionController {
                 .andWhere("session.status != :status", { status: SessionStatus.CANCELLED });
 
             if (userRole === "instructor") {
-                // Instructor sees sessions for their classes or their bookings
+                // Instructor sees sessions for their classes, their bookings, or ones they created
                 query.andWhere(
-                    "(class.teacherId = :userId OR booking.teacherId = :userId)",
+                    "(class.teacherId = :userId OR booking.teacherId = :userId OR session.teacherId = :userId)",
                     { userId }
                 );
             } else if (userRole === "student") {
@@ -85,7 +85,7 @@ export class SessionController {
             if (userRole === "admin") {
                 hasAccess = true;
             } else if (userRole === "instructor") {
-                hasAccess = session.class?.teacherId === userId || session.booking?.teacherId === userId;
+                hasAccess = session.class?.teacherId === userId || session.booking?.teacherId === userId || session.teacherId === userId;
             } else if (userRole === "student") {
                 if (session.booking?.studentId === userId) {
                     hasAccess = true;
@@ -127,7 +127,7 @@ export class SessionController {
             }
 
             // Verify teacher ownership
-            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId;
+            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId || session.teacherId === teacherId;
             if (!isOwner) {
                 return res.status(403).json({ error: "Only the instructor can start this session" });
             }
@@ -204,6 +204,7 @@ export class SessionController {
             }
 
             const session = sessionRepo.create({
+                teacherId, // Explicitly track the creator for ad-hoc sessions
                 classId: classId || undefined,
                 bookingId: bookingId || undefined,
                 title,
@@ -251,7 +252,7 @@ export class SessionController {
                 return res.status(400).json({ error: "Cannot cancel a completed session" });
             }
 
-            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId;
+            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId || session.teacherId === teacherId;
             if (!isOwner) {
                 return res.status(403).json({ error: "Only the instructor can cancel this session" });
             }
@@ -295,7 +296,7 @@ export class SessionController {
             }
 
             // Verify teacher ownership
-            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId;
+            const isOwner = session.class?.teacherId === teacherId || session.booking?.teacherId === teacherId || session.teacherId === teacherId;
             if (!isOwner) {
                 return res.status(403).json({ error: "Only the instructor can end this session" });
             }
