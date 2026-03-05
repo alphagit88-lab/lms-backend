@@ -6,8 +6,9 @@ const router = Router();
 
 // All routes require authentication
 router.get("/", authenticate, EnrollmentController.getMyEnrollments);
-router.get("/:id", authenticate, EnrollmentController.getById);
+router.post("/bulk", authenticate, EnrollmentController.bulkEnroll);
 router.post("/", authenticate, EnrollmentController.enroll);
+router.get("/:id", authenticate, EnrollmentController.getById);
 router.delete("/:id", authenticate, EnrollmentController.unenroll);
 
 // Progress tracking
