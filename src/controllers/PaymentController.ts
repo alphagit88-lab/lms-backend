@@ -1,16 +1,15 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import paymentService from "../services/PaymentService";
-import stripeService from "../services/StripeService";
+import payhereService, { PAYHERE_STATUS } from "../services/PayHereService";
 import { Payment, PaymentStatus, PaymentType } from "../entities/Payment";
 import { TransactionType } from "../entities/Transaction";
 
 export class PaymentController {
 
     /**
-     * Manually confirm a pending payment (Admin only - for dev/localhost use)
+     * Manually confirm a pending payment (Admin only — for dev/localhost use)
      * POST /api/payments/:paymentId/confirm
-     * This bypasses Stripe webhook and triggers the same fulfillment logic.
      */
     async manualConfirm(req: Request, res: Response) {
         try {
@@ -27,49 +26,12 @@ export class PaymentController {
                 return res.status(400).json({ error: "Payment already completed." });
             }
 
-            // Use stripePaymentIntentId if available, otherwise simulate directly
-            if (payment.stripePaymentIntentId) {
-                const result = await paymentService.confirmPaymentSuccess(payment.stripePaymentIntentId);
-                return res.json({
-                    message: "Payment confirmed and enrollment created successfully.",
-                    payment: result
-                });
-            } else {
-                // Directly update payment status and run fulfillment
-                payment.paymentStatus = PaymentStatus.COMPLETED;
-                payment.paymentDate = new Date();
-                await paymentRepo.save(payment);
-
-                // Trigger fulfillment manually by calling confirmPaymentSuccess internals
-                // Since there's no stripePaymentIntentId, we need to handle it directly
-                const { Enrollment } = await import("../entities/Enrollment");
-                const { Course } = await import("../entities/Course");
-
-                if (payment.paymentType === PaymentType.COURSE_ENROLLMENT) {
-                    const enrollmentRepo = AppDataSource.getRepository(Enrollment);
-                    const courseRepo = AppDataSource.getRepository(Course);
-
-                    const existing = await enrollmentRepo.findOne({
-                        where: { studentId: payment.userId, courseId: payment.referenceId }
-                    });
-
-                    if (!existing) {
-                        const enrollment = enrollmentRepo.create({
-                            studentId: payment.userId,
-                            courseId: payment.referenceId,
-                            status: "active",
-                            progressPercentage: 0,
-                        });
-                        await enrollmentRepo.save(enrollment);
-                        await courseRepo.increment({ id: payment.referenceId }, "enrollmentCount", 1);
-                    }
-                }
-
-                return res.json({
-                    message: "Payment confirmed and enrollment created successfully.",
-                    payment
-                });
-            }
+            // Trigger the same fulfillment logic used by the PayHere notify endpoint
+            const result = await paymentService.confirmPaymentSuccess(paymentId);
+            return res.json({
+                message: "Payment confirmed and fulfillment completed successfully.",
+                payment: result,
+            });
         } catch (error: any) {
             console.error("Manual confirm error:", error);
             return res.status(500).json({ error: error.message || "Failed to confirm payment." });
@@ -77,7 +39,9 @@ export class PaymentController {
     }
 
     /**
-     * Initializes a payment. Frontend hits this before rendering Stripe Element.
+     * Initialize a PayHere payment.
+     * Returns checkout params + checkout URL for the frontend to redirect to PayHere.
+     * POST /api/payments/create-intent
      */
     async createIntent(req: Request, res: Response) {
         try {
@@ -86,78 +50,120 @@ export class PaymentController {
                 referenceId,
                 amount,
                 currency = "LKR",
-                recipientId
+                recipientId,
+                itemDescription,
+                firstName,
+                lastName,
+                email,
+                phone,
             } = req.body;
 
             if (!type || !referenceId || !amount) {
-                return res.status(400).json({ error: "Missing required fields" });
+                return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
             }
 
-            const { clientSecret, paymentId } = await paymentService.initializePayment({
+            const result = await paymentService.initializePayment({
                 userId: req.session.userId!,
-                amount,
+                amount: Number(amount),
                 currency,
                 type: type as PaymentType,
                 referenceId,
                 recipientId,
+                itemDescription,
+                firstName,
+                lastName,
+                email,
+                phone,
             });
 
+            // Free items: no redirect needed
+            if (result.isFree) {
+                return res.status(200).json({
+                    isFree: true,
+                    paymentId: result.paymentId,
+                    checkoutParams: null,
+                    checkoutUrl: null,
+                    amount: 0,
+                });
+            }
+
+            // Paid items: return PayHere checkout params for frontend redirect
             return res.status(200).json({
-                clientSecret,
-                paymentId,
+                isFree: false,
+                paymentId: result.paymentId,
+                checkoutParams: result.checkoutParams,
+                checkoutUrl: result.checkoutUrl,
+                amount: result.amount,
             });
         } catch (error: any) {
             console.error("Initialize Payment Error:", error);
-            res.status(500).json({ error: error.message || "Failed to initialize payment." });
+            return res.status(500).json({ error: error.message || "Failed to initialize payment." });
         }
     }
 
     /**
-     * Stripe Webhook Endpoints
-     * Very critical: Must receive raw body buffer (Express JSON parser disabled)
+     * PayHere Notify Endpoint (server-to-server callback from PayHere)
+     * POST /api/payments/payhere-notify
+     *
+     * PayHere POSTs this as application/x-www-form-urlencoded after every payment event.
+     * No auth required — integrity verified via MD5 signature.
      */
-    async webhook(req: Request, res: Response) {
-        const signature = req.headers["stripe-signature"] as string;
-
-        if (!signature) {
-            return res.status(400).send("No stripe signature found.");
-        }
-
+    async payhereNotify(req: Request, res: Response) {
         try {
-            // Body is raw
-            const event = stripeService.constructWebhookEvent(req.body, signature);
+            const payload = req.body;
+            const { merchant_id, order_id, payment_id, payhere_amount, payhere_currency, status_code, md5sig, status_message, method } = payload;
 
-            // Handle the event
-            switch (event.type) {
-                case "payment_intent.succeeded":
-                    const paymentIntent = event.data.object as any;
-                    await paymentService.confirmPaymentSuccess(paymentIntent.id);
-                    console.log(`Payment confirmed: ${paymentIntent.id}`);
+            // Basic field validation
+            if (!merchant_id || !order_id || !status_code || !md5sig) {
+                console.warn("[PayHere Notify] Missing required fields:", payload);
+                return res.status(400).send("Missing required fields");
+            }
+
+            // Verify MD5 signature — ensures request is genuinely from PayHere
+            const isValid = payhereService.verifyNotification(payload);
+            if (!isValid) {
+                console.error("[PayHere Notify] Invalid MD5 signature for order:", order_id);
+                return res.status(400).send("Invalid signature");
+            }
+
+            console.log(`[PayHere Notify] order=${order_id} payment_id=${payment_id} status=${status_code} (${status_message}) method=${method}`);
+
+            switch (status_code) {
+                case PAYHERE_STATUS.SUCCESS:
+                    await paymentService.confirmPaymentSuccess(order_id);
+                    console.log(`[PayHere] Payment SUCCESS for order ${order_id}`);
                     break;
 
-                case "payment_intent.payment_failed":
-                    const failedIntent = event.data.object as any;
-                    await paymentService.confirmPaymentFailure(
-                        failedIntent.id,
-                        failedIntent.last_payment_error?.message
-                    );
-                    console.log(`Payment failed: ${failedIntent.id}`);
+                case PAYHERE_STATUS.PENDING:
+                    console.log(`[PayHere] Payment PENDING for order ${order_id}`);
                     break;
 
-                case "charge.refunded":
-                    // Log refund event later
+                case PAYHERE_STATUS.CANCELLED:
+                    await paymentService.confirmPaymentFailure(order_id, "Cancelled by customer.");
+                    console.log(`[PayHere] Payment CANCELLED for order ${order_id}`);
+                    break;
+
+                case PAYHERE_STATUS.FAILED:
+                    await paymentService.confirmPaymentFailure(order_id, status_message || "Payment failed.");
+                    console.log(`[PayHere] Payment FAILED for order ${order_id}`);
+                    break;
+
+                case PAYHERE_STATUS.CHARGEDBACK:
+                    await paymentService.confirmPaymentFailure(order_id, "Chargedback.");
+                    console.log(`[PayHere] Payment CHARGEDBACK for order ${order_id}`);
                     break;
 
                 default:
-                    console.log(`Unhandled event type ${event.type}`);
+                    console.warn(`[PayHere] Unknown status_code ${status_code} for order ${order_id}`);
             }
 
-            // Return a 200 response to acknowledge receipt of the event
-            return res.status(200).json({ received: true });
+            // Must respond 200 or PayHere will retry
+            return res.status(200).send("OK");
 
         } catch (err: any) {
-            console.error("Webhook event handling error:", err);
-            return res.status(400).send(`Webhook Error: ${err.message}`);
+            console.error("[PayHere Notify] Error:", err);
+            // Still 200 to prevent retry storms; errors logged for manual review
+            return res.status(200).send("OK");
         }
     }
 

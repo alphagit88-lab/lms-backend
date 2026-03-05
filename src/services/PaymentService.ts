@@ -1,7 +1,7 @@
 import { AppDataSource } from "../config/data-source";
 import { Payment, PaymentStatus, PaymentType, PaymentMethod } from "../entities/Payment";
 import { Transaction, TransactionType } from "../entities/Transaction";
-import stripeService from "./StripeService";
+import payhereService, { PayHereCheckoutParams } from "./PayHereService";
 import { User } from "../entities/User";
 import { CommissionService } from "./CommissionService";
 import { Enrollment } from "../entities/Enrollment";
@@ -16,7 +16,8 @@ class PaymentService {
     private courseRepo = AppDataSource.getRepository(Course);
 
     /**
-     * Intializes a payment session, generating the Stripe Client Secret
+     * Initializes a PayHere payment session.
+     * Returns checkout params for the frontend to POST to PayHere's hosted page.
      */
     async initializePayment(params: {
         userId: string;
@@ -25,8 +26,32 @@ class PaymentService {
         type: PaymentType;
         referenceId: string;
         recipientId?: string;
-    }): Promise<{ clientSecret: string | null; paymentId: string; amount: number }> {
-        const { userId, amount, currency, type, referenceId, recipientId } = params;
+        itemDescription?: string;
+        // Customer info for PayHere
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        phone?: string;
+    }): Promise<{
+        checkoutParams: PayHereCheckoutParams | null;
+        checkoutUrl: string | null;
+        paymentId: string;
+        amount: number;
+        isFree: boolean;
+    }> {
+        const {
+            userId,
+            amount,
+            currency,
+            type,
+            referenceId,
+            recipientId,
+            itemDescription = "LMS Payment",
+            firstName = "Student",
+            lastName = "User",
+            email = "student@lms.com",
+            phone,
+        } = params;
 
         // Platform fee mapping using CommissionService
         const { platformFee } = CommissionService.calculate(amount);
@@ -39,15 +64,15 @@ class PaymentService {
             paymentType: type,
             referenceId,
             recipientId,
-            paymentMethod: PaymentMethod.STRIPE,
+            paymentMethod: PaymentMethod.PAYHERE,
             paymentStatus: PaymentStatus.PENDING,
         });
 
-        // Save payment entity to get a valid UUID
+        // Save payment entity to get a valid UUID — this UUID becomes the PayHere order_id
         payment = await this.paymentRepo.save(payment);
 
         try {
-            // Free items bypass stripe
+            // Free items bypass PayHere
             if (amount <= 0) {
                 payment.paymentStatus = PaymentStatus.COMPLETED;
                 payment.paymentDate = new Date();
@@ -56,27 +81,37 @@ class PaymentService {
                 await this.createTransactions(payment.id, userId, recipientId, amount, platformFee);
 
                 return {
-                    clientSecret: null,
+                    checkoutParams: null,
+                    checkoutUrl: null,
                     paymentId: payment.id,
                     amount: 0,
+                    isFree: true,
                 };
             }
 
-            // Initialize the real Stripe Intent
-            const intent = await stripeService.createPaymentIntent(amount, currency, {
-                paymentId: payment.id,
-                type,
-                referenceId,
+            // Build PayHere checkout parameters
+            // The payment DB UUID is used as the order_id so we can look it up on notify
+            const checkoutParams = payhereService.buildCheckoutParams({
+                orderId: payment.id,
+                amount,
+                currency,
+                itemDescription,
+                firstName,
+                lastName,
+                email,
+                phone,
             });
 
-            // Update payment record with tracking details
-            payment.stripePaymentIntentId = intent.id;
+            // Store the gateway order reference (same as payment.id, but explicit)
+            payment.gatewayOrderId = payment.id;
             await this.paymentRepo.save(payment);
 
             return {
-                clientSecret: intent.client_secret,
+                checkoutParams,
+                checkoutUrl: payhereService.getCheckoutUrl(),
                 paymentId: payment.id,
                 amount,
+                isFree: false,
             };
         } catch (error) {
             payment.paymentStatus = PaymentStatus.FAILED;
@@ -87,15 +122,16 @@ class PaymentService {
     }
 
     /**
-     * Once a payment is cleared by stripe via a webhook, we permanently confirm it.
+     * Once a payment is cleared by PayHere via the notify callback, permanently confirm it.
+     * The `paymentId` here is our DB payment UUID, which is also the PayHere order_id.
      */
-    async confirmPaymentSuccess(paymentIntentId: string): Promise<Payment | null> {
+    async confirmPaymentSuccess(paymentId: string): Promise<Payment | null> {
         const payment = await this.paymentRepo.findOne({
-            where: { stripePaymentIntentId: paymentIntentId },
+            where: { id: paymentId },
         });
 
         if (!payment) {
-            console.warn(`Webhook Error: payment intent ${paymentIntentId} not found in DB`);
+            console.warn(`PayHere Notify: payment ${paymentId} not found in DB`);
             return null;
         }
 
@@ -159,11 +195,12 @@ class PaymentService {
     }
 
     /**
-     * Handle failed payment
+     * Handle failed payment from PayHere notification.
+     * `paymentId` is our DB UUID (= PayHere order_id).
      */
-    async confirmPaymentFailure(paymentIntentId: string, errorMsg?: string): Promise<Payment | null> {
+    async confirmPaymentFailure(paymentId: string, errorMsg?: string): Promise<Payment | null> {
         const payment = await this.paymentRepo.findOne({
-            where: { stripePaymentIntentId: paymentIntentId },
+            where: { id: paymentId },
         });
 
         if (!payment) return null;

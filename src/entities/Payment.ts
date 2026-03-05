@@ -23,6 +23,7 @@ export enum PaymentMethod {
   DEBIT_CARD = "debit_card",
   PAYPAL = "paypal",
   STRIPE = "stripe",
+  PAYHERE = "payhere",
   BANK_TRANSFER = "bank_transfer",
   WALLET = "wallet",
 }
@@ -89,8 +90,12 @@ export class Payment {
   @Column({ name: "transaction_id", length: 255, nullable: true })
   transactionId?: string;
 
+  /**
+   * PayHere order_id (= our payment.id UUID) or legacy Stripe payment intent ID.
+   * Column kept as stripe_payment_intent_id for backwards compatibility.
+   */
   @Column({ name: "stripe_payment_intent_id", length: 255, nullable: true })
-  stripePaymentIntentId?: string;
+  gatewayOrderId?: string;
 
   @Column({ name: "payment_date", type: "timestamp", nullable: true })
   paymentDate?: Date;

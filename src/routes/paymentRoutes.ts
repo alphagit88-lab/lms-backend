@@ -5,18 +5,18 @@ import { paymentController } from "../controllers/PaymentController";
 
 const router = Router();
 
-// Endpoint for creating an intent. We specifically use express.json() here since global parsing is disabled prior.
+// Initialize a PayHere payment session — returns checkout params for frontend redirect
 router.post("/create-intent", authenticate, express.json(), paymentController.createIntent);
 
-// Endpoint for Stripe to hit our webhook
-// Must not parse body to JSON, Stripe needs the raw Buffer!
+// PayHere server-to-server notify endpoint (called by PayHere after payment)
+// Receives application/x-www-form-urlencoded — no auth, verified by MD5 signature
 router.post(
-    "/webhook",
-    express.raw({ type: "application/json" }),
-    paymentController.webhook
+    "/payhere-notify",
+    express.urlencoded({ extended: false }),
+    paymentController.payhereNotify
 );
 
-// History
+// Payment history & earnings
 router.get("/history", authenticate, paymentController.getMyPayments);
 router.get("/transactions", authenticate, paymentController.getTransactions);
 router.get("/earnings", authenticate, paymentController.getTeacherEarnings);
@@ -31,3 +31,4 @@ router.post(
 );
 
 export default router;
+
