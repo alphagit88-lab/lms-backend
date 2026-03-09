@@ -12,6 +12,7 @@ import { User } from "./User";
 
 export enum PaymentStatus {
   PENDING = "pending",
+  UNDER_REVIEW = "under_review",
   COMPLETED = "completed",
   FAILED = "failed",
   REFUNDED = "refunded",
@@ -30,6 +31,7 @@ export enum PaymentMethod {
 
 export enum PaymentType {
   COURSE_ENROLLMENT = "course_enrollment",
+  BULK_COURSE_ENROLLMENT = "bulk_course_enrollment",
   BOOKING_SESSION = "booking_session",
   CONTENT_PURCHASE = "content_purchase",
   SUBSCRIPTION = "subscription",
@@ -127,4 +129,11 @@ export class Payment {
   // Track if this payment has been paid out
   @Column({ name: "payout_id", nullable: true })
   payoutId?: string;
+
+  // Manual / bank-transfer payment fields
+  @Column({ name: "bank_slip_url", length: 500, nullable: true })
+  bankSlipUrl?: string;
+
+  @Column({ name: "manual_review_note", type: "text", nullable: true })
+  manualReviewNote?: string;
 }

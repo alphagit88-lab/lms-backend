@@ -101,8 +101,43 @@ export class PaymentController {
         }
     }
 
-    /**
-     * PayHere Notify Endpoint (server-to-server callback from PayHere)
+    /**     * Initialize a single combined PayHere payment for multiple courses.
+     * POST /api/payments/create-bulk-intent
+     * Body: { courseIds: string[], currency?, firstName?, lastName?, email?, phone? }
+     */
+    async createBulkIntent(req: Request, res: Response) {
+        try {
+            const { courseIds, currency = "LKR", firstName, lastName, email, phone } = req.body;
+
+            if (!Array.isArray(courseIds) || courseIds.length === 0) {
+                return res.status(400).json({ error: "courseIds must be a non-empty array." });
+            }
+
+            const result = await paymentService.initializeBulkPayment({
+                userId: req.session.userId!,
+                courseIds,
+                currency,
+                firstName,
+                lastName,
+                email,
+                phone,
+            });
+
+            return res.status(200).json({
+                isFree: result.isFree,
+                paymentId: result.paymentId,
+                checkoutParams: result.checkoutParams,
+                checkoutUrl: result.checkoutUrl,
+                amount: result.amount,
+                courses: result.courses,
+            });
+        } catch (error: any) {
+            console.error("Bulk Intent Error:", error);
+            return res.status(500).json({ error: error.message || "Failed to initialize bulk payment." });
+        }
+    }
+
+    /**     * PayHere Notify Endpoint (server-to-server callback from PayHere)
      * POST /api/payments/payhere-notify
      *
      * PayHere POSTs this as application/x-www-form-urlencoded after every payment event.
@@ -198,6 +233,92 @@ export class PaymentController {
             return res.json(earnings);
         } catch (error: any) {
             return res.status(500).json({ error: "Failed to fetch earnings." });
+        }
+    }
+
+    // ── MANUAL / BANK-TRANSFER PAYMENTS ──────────────────────────────────────
+
+    /** POST /api/payments/bank-transfer/create-intent */
+    async createBankTransferIntent(req: Request, res: Response) {
+        try {
+            const { type, referenceId, amount, currency = "LKR", recipientId } = req.body;
+            if (!type || !referenceId || !amount) {
+                return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
+            }
+            const result = await paymentService.initializeBankTransferPayment({
+                userId: req.session.userId!,
+                amount: Number(amount),
+                currency,
+                type: type as PaymentType,
+                referenceId,
+                recipientId,
+            });
+            return res.status(201).json(result);
+        } catch (error: any) {
+            return res.status(500).json({ error: error.message || "Failed to initialize bank transfer." });
+        }
+    }
+
+    /** POST /api/payments/bank-transfer/create-bulk-intent */
+    async createBulkBankTransferIntent(req: Request, res: Response) {
+        try {
+            const { courseIds, currency = "LKR" } = req.body;
+            if (!Array.isArray(courseIds) || courseIds.length === 0) {
+                return res.status(400).json({ error: "courseIds must be a non-empty array." });
+            }
+            const result = await paymentService.initializeBulkBankTransfer({
+                userId: req.session.userId!,
+                courseIds,
+                currency,
+            });
+            return res.status(201).json(result);
+        } catch (error: any) {
+            return res.status(500).json({ error: error.message || "Failed to initialize bulk bank transfer." });
+        }
+    }
+
+    /** POST /api/payments/bank-transfer/:paymentId/upload-slip — multipart/form-data, field "slip" */
+    async uploadBankSlip(req: Request, res: Response) {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: "No slip file uploaded." });
+            }
+            const paymentId = String(req.params.paymentId);
+            const slipUrl = `/uploads/bank-slips/${req.file.filename}`;
+            const payment = await paymentService.uploadBankSlip(paymentId, String(req.session.userId!), slipUrl);
+            return res.json({ message: "Bank slip uploaded. Your payment is under review.", payment });
+        } catch (error: any) {
+            return res.status(error.message === "Forbidden." ? 403 : 400).json({ error: error.message });
+        }
+    }
+
+    /** GET /api/payments/bank-transfer/pending — admin & instructor */
+    async getPendingManualPayments(req: Request, res: Response) {
+        try {
+            const role = req.session.userRole!;
+            const payments = await paymentService.getPendingManualPayments({
+                role,
+                instructorId: role === "instructor" ? req.session.userId! : undefined,
+            });
+            return res.json({ payments });
+        } catch (error: any) {
+            return res.status(500).json({ error: error.message || "Failed to fetch manual payments." });
+        }
+    }
+
+    /** POST /api/payments/bank-transfer/:paymentId/review — admin & instructor */
+    async reviewManualPayment(req: Request, res: Response) {
+        try {
+            const paymentId = String(req.params.paymentId);
+            const { action, note } = req.body;
+            if (action !== "approve" && action !== "reject") {
+                return res.status(400).json({ error: "action must be 'approve' or 'reject'." });
+            }
+            const reviewAction = action as "approve" | "reject";
+            const payment = await paymentService.reviewManualPayment(paymentId, reviewAction, note);
+            return res.json({ message: `Payment ${action}d successfully.`, payment });
+        } catch (error: any) {
+            return res.status(500).json({ error: error.message || "Failed to review payment." });
         }
     }
 }
