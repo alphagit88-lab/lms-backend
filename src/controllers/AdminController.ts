@@ -1,11 +1,12 @@
 import { Request, Response } from "express";
+import { In } from "typeorm";
 import { AppDataSource } from "../config/data-source";
 import { TeacherProfile } from "../entities/TeacherProfile";
 import { User } from "../entities/User";
 import { Course } from "../entities/Course";
 import { Booking } from "../entities/Booking";
 import { Payout, PayoutStatus } from "../entities/Payout";
-import { Payment } from "../entities/Payment";
+import { Payment, PaymentType } from "../entities/Payment";
 import { Enrollment } from "../entities/Enrollment";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 
@@ -352,16 +353,15 @@ export class AdminController {
   static async getPayments(req: Request, res: Response) {
     try {
       const { page = "1", limit = "20", status } = req.query;
-      const qb = paymentRepository.createQueryBuilder("p")
-        .leftJoinAndSelect("p.student", "student")
-        .leftJoinAndSelect("p.course", "course");
-
-      if (status) {
-        qb.andWhere("p.status = :status", { status });
-      }
-
       const pageNum = parseInt(page as string, 10);
       const pageSize = parseInt(limit as string, 10);
+
+      const qb = paymentRepository.createQueryBuilder("p")
+        .leftJoinAndSelect("p.user", "student");
+
+      if (status) {
+        qb.andWhere("p.paymentStatus = :status", { status });
+      }
 
       const [payments, total] = await qb
         .orderBy("p.createdAt", "DESC")
@@ -369,11 +369,40 @@ export class AdminController {
         .take(pageSize)
         .getManyAndCount();
 
+      // Load course titles for course_enrollment payments
+      const courseIds = payments
+        .filter(p => p.paymentType === PaymentType.COURSE_ENROLLMENT)
+        .map(p => p.referenceId)
+        .filter(Boolean);
+
+      const courses = courseIds.length > 0
+        ? await courseRepository.find({ where: { id: In(courseIds) }, select: ["id", "title"] })
+        : [];
+      const courseMap = new Map(courses.map(c => [c.id, c]));
+
+      const result = payments.map(p => ({
+        id: p.id,
+        studentId: p.userId,
+        courseId: p.paymentType === PaymentType.COURSE_ENROLLMENT ? p.referenceId : null,
+        amount: p.amount,
+        status: p.paymentStatus.toUpperCase(),
+        transactionId: p.transactionId ?? null,
+        createdAt: p.createdAt,
+        student: {
+          firstName: p.user?.firstName ?? '',
+          lastName: p.user?.lastName ?? '',
+          email: p.user?.email ?? '',
+        },
+        course: p.paymentType === PaymentType.COURSE_ENROLLMENT
+          ? (courseMap.get(p.referenceId) ?? null)
+          : null,
+      }));
+
       res.json({
-        payments,
+        payments: result,
         total,
         page: pageNum,
-        totalPages: Math.ceil(total / pageSize)
+        totalPages: Math.ceil(total / pageSize),
       });
     } catch (error) {
       console.error("Get payments error:", error);

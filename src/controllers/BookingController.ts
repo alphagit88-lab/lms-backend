@@ -12,6 +12,7 @@ import { QueryRunner } from "typeorm";
 import ZoomService from "../services/ZoomService";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
 import { Logger } from "../utils/logger";
+import { NotificationService } from "../services/NotificationService";
 
 /**
  * Cancellation refund policy:
@@ -428,6 +429,16 @@ export class BookingController {
         await BookingController.createZoomMeetingForBooking(booking, teacherName);
       }
 
+      // Fire notification (fire-and-forget)
+      const userRepo = AppDataSource.getRepository(User);
+      const [student, teacher] = await Promise.all([
+        userRepo.findOne({ where: { id: booking.studentId } }),
+        userRepo.findOne({ where: { id: booking.teacherId } }),
+      ]);
+      if (student && teacher) {
+        void NotificationService.notifyBookingConfirmed(booking, student, teacher);
+      }
+
       return res.json({ message: "Booking confirmed successfully", booking });
     } catch (error: any) {
       console.error("Error confirming booking:", error);
@@ -509,6 +520,17 @@ export class BookingController {
           slot.status = SlotStatus.AVAILABLE;
         }
         await slotRepository.save(slot);
+      }
+
+      // Fire cancellation notification (fire-and-forget)
+      const userRepo = AppDataSource.getRepository(User);
+      const [student, teacher, cancelledByUser] = await Promise.all([
+        userRepo.findOne({ where: { id: booking.studentId } }),
+        userRepo.findOne({ where: { id: booking.teacherId } }),
+        userRepo.findOne({ where: { id: userId } }),
+      ]);
+      if (student && teacher && cancelledByUser) {
+        void NotificationService.notifyBookingCancelled(booking, student, teacher, cancelledByUser);
       }
 
       return res.json({

@@ -7,6 +7,8 @@ import { Logger } from "../utils/logger";
 import { IsNull, Not } from "typeorm";
 import { OCRService } from "../services/OCRService";
 import { PDFService } from "../services/PDFService";
+import { NotificationService } from "../services/NotificationService";
+import { User } from "../entities/User";
 
 export class GradingController {
     /**
@@ -245,6 +247,24 @@ export class GradingController {
             // Enable showCorrectAnswers on the exam
             exam.showCorrectAnswers = true;
             await examRepo.save(exam);
+
+            // Notify each graded student (fire-and-forget)
+            const gradedMasters = await AppDataSource.getRepository(AnswerSubmission).find({
+                where: { examId, questionId: IsNull(), status: SubmissionStatus.GRADED },
+                relations: ["student"],
+            });
+            const userRepo = AppDataSource.getRepository(User);
+            for (const master of gradedMasters) {
+                if (!master.student) continue;
+                void NotificationService.notifyGradePublished(
+                    exam.title,
+                    exam.id,
+                    master.studentId,
+                    master.student,
+                    Number(master.marksAwarded) || 0,
+                    exam.totalMarks
+                );
+            }
 
             return res.json({
                 message: "Exam scores published successfully.",

@@ -4,6 +4,8 @@ import paymentService from "../services/PaymentService";
 import payhereService, { PAYHERE_STATUS } from "../services/PayHereService";
 import { Payment, PaymentStatus, PaymentType } from "../entities/Payment";
 import { TransactionType } from "../entities/Transaction";
+import { NotificationService } from "../services/NotificationService";
+import { User } from "../entities/User";
 
 export class PaymentController {
 
@@ -167,6 +169,15 @@ export class PaymentController {
                 case PAYHERE_STATUS.SUCCESS:
                     await paymentService.confirmPaymentSuccess(order_id);
                     console.log(`[PayHere] Payment SUCCESS for order ${order_id}`);
+                    // Fire payment success notification (fire-and-forget)
+                    {
+                        const paymentRepo = AppDataSource.getRepository(Payment);
+                        const payment = await paymentRepo.findOne({ where: { id: order_id } });
+                        if (payment) {
+                            const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
+                            if (payer) void NotificationService.notifyPaymentSuccess(payment, payer);
+                        }
+                    }
                     break;
 
                 case PAYHERE_STATUS.PENDING:
