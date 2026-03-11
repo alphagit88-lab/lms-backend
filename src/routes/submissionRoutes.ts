@@ -25,4 +25,11 @@ router.get(
     SubmissionController.getSubmissionHistory
 );
 
+// Save draft answers (auto-save without submitting)
+router.post(
+    "/exam/:examId/save-draft",
+    authenticate,
+    SubmissionController.saveDraft
+);
+
 export default router;

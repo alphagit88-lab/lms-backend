@@ -18,6 +18,7 @@ import { Recording } from "../entities/Recording";
 import { Content, ContentType } from "../entities/Content";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from "../entities/Payment";
+import { Payout, PayoutStatus, PayoutMethod } from "../entities/Payout";
 import { Notification, NotificationChannel, NotificationType } from "../entities/Notification";
 import bcrypt from "bcryptjs";
 
@@ -59,6 +60,7 @@ async function seedFull() {
         const contentRepo = AppDataSource.getRepository(Content);
         const studentParentRepo = AppDataSource.getRepository(StudentParent);
         const paymentRepo = AppDataSource.getRepository(Payment);
+        const payoutRepo = AppDataSource.getRepository(Payout);
         const notificationRepo = AppDataSource.getRepository(Notification);
 
         // ─── Wipe existing seed data (idempotent re-run) ─────
@@ -66,7 +68,7 @@ async function seedFull() {
         // Disable FK constraint checks so we can truncate in any order
         await AppDataSource.query(`SET session_replication_role = 'replica'`);
         const tables = [
-            "notifications", "payments", "student_parents",
+            "notifications", "payments", "payouts", "student_parents",
             "recordings", "sessions", "booking_packages", "bookings",
             "availability_slots", "lesson_progress", "enrollments",
             "lessons", "courses", "classes", "contents",
@@ -83,7 +85,7 @@ async function seedFull() {
             }
         }
         // Re-enable FK constraint checks
-        await AppDataSource.query(`SET session_replication_role = 'DEFAULT'`);
+        await AppDataSource.query(`SET session_replication_role = 'origin'`);
         console.log("  ✅ Database cleared\n");
 
         const hashedPassword = await bcrypt.hash("Test@1234", 10);
@@ -613,22 +615,89 @@ async function seedFull() {
         console.log("\n📖 ACT 6 — Processing payments...\n");
 
         const payments = [
-            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[0].id, recipientId: instructors[0].id, amount: 99.99, platformFee: 15.0, currency: "USD", paymentMethod: PaymentMethod.STRIPE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_stripe_001", paymentDate: daysAgo(60) }),
-            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[2].id, recipientId: instructors[1].id, amount: 59.99, platformFee: 9.0, currency: "USD", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_cc_002", paymentDate: daysAgo(30) }),
-            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.BOOKING_SESSION, referenceId: savedBookings[0].id, recipientId: instructors[0].id, amount: 50.0, platformFee: 7.5, currency: "USD", paymentMethod: PaymentMethod.STRIPE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_stripe_003", paymentDate: daysAgo(5) }),
-            paymentRepo.create({ userId: parents[0].id, paymentType: PaymentType.BOOKING_SESSION, referenceId: savedBookings[5].id, recipientId: instructors[2].id, amount: 25.0, platformFee: 3.75, currency: "USD", paymentMethod: PaymentMethod.BANK_TRANSFER, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_bank_004", paymentDate: daysAgo(2) }),
-            paymentRepo.create({ userId: students[4].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[0].id, recipientId: instructors[0].id, amount: 99.99, platformFee: 15.0, currency: "USD", paymentMethod: PaymentMethod.STRIPE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_stripe_005", paymentDate: daysAgo(40) }),
-            paymentRepo.create({ userId: students[1].id, paymentType: PaymentType.CONTENT_PURCHASE, referenceId: contents[4].id, recipientId: instructors[2].id, amount: 4.99, platformFee: 0.75, currency: "USD", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_cc_006", paymentDate: daysAgo(10) }),
+            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[0].id, recipientId: instructors[0].id, amount: 99.99, platformFee: 15.0, currency: "LKR", paymentMethod: PaymentMethod.PAYHERE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_ph_001", paymentDate: daysAgo(60) }),
+            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[2].id, recipientId: instructors[1].id, amount: 59.99, platformFee: 9.0, currency: "LKR", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_cc_002", paymentDate: daysAgo(30) }),
+            paymentRepo.create({ userId: students[0].id, paymentType: PaymentType.BOOKING_SESSION, referenceId: savedBookings[0].id, recipientId: instructors[0].id, amount: 50.0, platformFee: 7.5, currency: "LKR", paymentMethod: PaymentMethod.PAYHERE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_ph_003", paymentDate: daysAgo(5) }),
+            paymentRepo.create({ userId: parents[0].id, paymentType: PaymentType.BOOKING_SESSION, referenceId: savedBookings[5].id, recipientId: instructors[2].id, amount: 25.0, platformFee: 3.75, currency: "LKR", paymentMethod: PaymentMethod.BANK_TRANSFER, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_bank_004", paymentDate: daysAgo(2) }),
+            paymentRepo.create({ userId: students[4].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[0].id, recipientId: instructors[0].id, amount: 99.99, platformFee: 15.0, currency: "LKR", paymentMethod: PaymentMethod.PAYHERE, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_ph_005", paymentDate: daysAgo(40) }),
+            paymentRepo.create({ userId: students[1].id, paymentType: PaymentType.CONTENT_PURCHASE, referenceId: contents[4].id, recipientId: instructors[2].id, amount: 4.99, platformFee: 0.75, currency: "LKR", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.COMPLETED, transactionId: "txn_cc_006", paymentDate: daysAgo(10) }),
             // A failed payment
-            paymentRepo.create({ userId: students[2].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[4].id, recipientId: instructors[2].id, amount: 149.99, platformFee: 22.5, currency: "USD", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.FAILED, failureReason: "Card declined — insufficient funds", paymentDate: daysAgo(95) }),
+            paymentRepo.create({ userId: students[2].id, paymentType: PaymentType.COURSE_ENROLLMENT, referenceId: courses[4].id, recipientId: instructors[2].id, amount: 149.99, platformFee: 22.5, currency: "LKR", paymentMethod: PaymentMethod.CREDIT_CARD, paymentStatus: PaymentStatus.FAILED, failureReason: "Card declined — insufficient funds", paymentDate: daysAgo(95) }),
         ];
         await paymentRepo.save(payments);
         console.log(`  💳 Created ${payments.length} payment records (6 completed, 1 failed)`);
 
         // ═══════════════════════════════════════════════════════
-        //  ACT 7 — NOTIFICATIONS
+        //  ACT 7 — PAYOUTS
         // ═══════════════════════════════════════════════════════
-        console.log("\n📖 ACT 7 — Sending notifications...\n");
+        console.log("\n📖 ACT 7 — Processing weekly payouts...\n");
+
+        const bankDetails = { bank: "Commercial Bank of Ceylon", accountNumber: "****4521", branchCode: "001" };
+
+        const payouts = await payoutRepo.save([
+            // John Doe — 3 completed past payouts + 1 pending (current week)
+            payoutRepo.create({
+                teacherId: instructors[0].id,
+                amount: 168.99,
+                periodStart: daysAgo(28),
+                periodEnd: daysAgo(21),
+                status: PayoutStatus.COMPLETED,
+                payoutMethod: PayoutMethod.BANK_TRANSFER,
+                bankDetails,
+                processedAt: daysAgo(21),
+                reference: "PAY-2026-W01",
+            }),
+            payoutRepo.create({
+                teacherId: instructors[0].id,
+                amount: 127.49,
+                periodStart: daysAgo(21),
+                periodEnd: daysAgo(14),
+                status: PayoutStatus.COMPLETED,
+                payoutMethod: PayoutMethod.BANK_TRANSFER,
+                bankDetails,
+                processedAt: daysAgo(14),
+                reference: "PAY-2026-W02",
+            }),
+            payoutRepo.create({
+                teacherId: instructors[0].id,
+                amount: 84.99,
+                periodStart: daysAgo(14),
+                periodEnd: daysAgo(7),
+                status: PayoutStatus.COMPLETED,
+                payoutMethod: PayoutMethod.BANK_TRANSFER,
+                bankDetails,
+                processedAt: daysAgo(7),
+                reference: "PAY-2026-W03",
+            }),
+            payoutRepo.create({
+                teacherId: instructors[0].id,
+                amount: 42.50,
+                periodStart: daysAgo(7),
+                periodEnd: new Date(),
+                status: PayoutStatus.PENDING,
+                payoutMethod: PayoutMethod.BANK_TRANSFER,
+                bankDetails,
+                reference: "PAY-2026-W04",
+            }),
+            // Nihal Silva — 1 completed payout via mobile money
+            payoutRepo.create({
+                teacherId: instructors[2].id,
+                amount: 4.24,
+                periodStart: daysAgo(14),
+                periodEnd: daysAgo(7),
+                status: PayoutStatus.COMPLETED,
+                payoutMethod: PayoutMethod.MOBILE_MONEY,
+                bankDetails: { provider: "Dialog", walletNumber: "077****123" },
+                processedAt: daysAgo(7),
+                reference: "PAY-2026-NV-W03",
+            }),
+        ]);
+        console.log(`  💰 Created ${payouts.length} payout records (4 for John Doe, 1 for Nihal Silva)`);
+
+        // ═══════════════════════════════════════════════════════
+        //  ACT 8 — NOTIFICATIONS
+        // ═══════════════════════════════════════════════════════
+        console.log("\n📖 ACT 8 — Sending notifications...\n");
 
         const notifications = [
             notificationRepo.create({ userId: students[0].id, channel: NotificationChannel.IN_APP, notificationType: NotificationType.BOOKING_CONFIRMED, title: "Booking Confirmed!", message: "Your session with John Doe on " + futureSlots[0].startTime.toLocaleDateString() + " has been confirmed.", actionUrl: "/bookings", sentAt: daysAgo(1), isRead: false }),
@@ -666,6 +735,7 @@ async function seedFull() {
         console.log("   ├── 3  Recordings");
         console.log(`   ├── ${contents.length}  Content Items`);
         console.log(`   ├── ${payments.length}  Payments`);
+        console.log(`   ├── ${payouts.length}  Payouts`);
         console.log(`   └── ${notifications.length}  Notifications`);
         console.log("\n🔑 Login Credentials (all passwords: Test@1234):");
         console.log("   ┌─────────────────────────────────────────────────┐");

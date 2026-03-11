@@ -162,13 +162,17 @@ export class CourseController {
   static async getMyCourses(req: Request, res: Response) {
     try {
       const userId = req.session.userId;
+      const userRole = req.session.userRole;
 
       if (!userId) {
         return res.status(401).json({ error: "Authentication required" });
       }
 
+      // If admin, they see all courses. If instructor, they see only their own.
+      const whereCondition = userRole === "admin" ? {} : { instructorId: userId };
+
       const courses = await courseRepository.find({
-        where: { instructorId: userId },
+        where: whereCondition,
         relations: ["category", "lessons", "enrollments"],
         order: { createdAt: "DESC" },
       });
@@ -486,8 +490,8 @@ export class CourseController {
           .json({ error: "Not authorized to publish this course" });
       }
 
-      // Validate course has lessons before publishing
-      if (isPublished && (!course.lessons || course.lessons.length === 0)) {
+      // Validate course has lessons before publishing (instructors only; admins can override)
+      if (isPublished && !isAdmin && (!course.lessons || course.lessons.length === 0)) {
         return res
           .status(400)
           .json({ error: "Cannot publish course without lessons" });

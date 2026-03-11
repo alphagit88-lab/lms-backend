@@ -12,6 +12,7 @@ import { User } from "./User";
 
 export enum PaymentStatus {
   PENDING = "pending",
+  UNDER_REVIEW = "under_review",
   COMPLETED = "completed",
   FAILED = "failed",
   REFUNDED = "refunded",
@@ -23,12 +24,14 @@ export enum PaymentMethod {
   DEBIT_CARD = "debit_card",
   PAYPAL = "paypal",
   STRIPE = "stripe",
+  PAYHERE = "payhere",
   BANK_TRANSFER = "bank_transfer",
   WALLET = "wallet",
 }
 
 export enum PaymentType {
   COURSE_ENROLLMENT = "course_enrollment",
+  BULK_COURSE_ENROLLMENT = "bulk_course_enrollment",
   BOOKING_SESSION = "booking_session",
   CONTENT_PURCHASE = "content_purchase",
   SUBSCRIPTION = "subscription",
@@ -89,8 +92,12 @@ export class Payment {
   @Column({ name: "transaction_id", length: 255, nullable: true })
   transactionId?: string;
 
+  /**
+   * PayHere order_id (= our payment.id UUID) or legacy Stripe payment intent ID.
+   * Column kept as stripe_payment_intent_id for backwards compatibility.
+   */
   @Column({ name: "stripe_payment_intent_id", length: 255, nullable: true })
-  stripePaymentIntentId?: string;
+  gatewayOrderId?: string;
 
   @Column({ name: "payment_date", type: "timestamp", nullable: true })
   paymentDate?: Date;
@@ -122,4 +129,11 @@ export class Payment {
   // Track if this payment has been paid out
   @Column({ name: "payout_id", nullable: true })
   payoutId?: string;
+
+  // Manual / bank-transfer payment fields
+  @Column({ name: "bank_slip_url", length: 500, nullable: true })
+  bankSlipUrl?: string;
+
+  @Column({ name: "manual_review_note", type: "text", nullable: true })
+  manualReviewNote?: string;
 }

@@ -3,6 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { Session, SessionStatus, SessionType } from "../entities/Session";
 import { Booking, BookingStatus } from "../entities/Booking";
 import { Class } from "../entities/Class";
+import { Course } from "../entities/Course";
 import { Enrollment } from "../entities/Enrollment";
 import { User } from "../entities/User";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
@@ -32,7 +33,10 @@ export class SessionController {
                     { userId }
                 );
             } else if (userRole === "student") {
-                // Student sees sessions for their bookings or classes they are enrolled in
+                // Student sees sessions:
+                //   1. Directly booked for them
+                //   2. For classes linked to courses they are enrolled in
+                //   3. Ad-hoc sessions created by instructors of their enrolled courses
                 const enrollmentRepo = AppDataSource.getRepository(Enrollment);
                 const enrollments = await enrollmentRepo.find({
                     where: { studentId: userId, status: "active" },
@@ -41,10 +45,24 @@ export class SessionController {
                 const enrolledCourseIds = enrollments.map(e => e.courseId);
 
                 if (enrolledCourseIds.length > 0) {
-                    query.andWhere(
-                        "(booking.studentId = :userId OR class.courseId IN (:...courseIds))",
-                        { userId, courseIds: enrolledCourseIds }
-                    );
+                    // Get instructor IDs for all enrolled courses
+                    const courses = await AppDataSource.getRepository(Course).find({
+                        where: enrolledCourseIds.map(id => ({ id })),
+                        select: ["instructorId"],
+                    });
+                    const instructorIds = [...new Set(courses.map(c => c.instructorId))];
+
+                    if (instructorIds.length > 0) {
+                        query.andWhere(
+                            "(booking.studentId = :userId OR class.courseId IN (:...courseIds) OR session.teacherId IN (:...instructorIds))",
+                            { userId, courseIds: enrolledCourseIds, instructorIds }
+                        );
+                    } else {
+                        query.andWhere(
+                            "(booking.studentId = :userId OR class.courseId IN (:...courseIds))",
+                            { userId, courseIds: enrolledCourseIds }
+                        );
+                    }
                 } else {
                     query.andWhere("booking.studentId = :userId", { userId });
                 }

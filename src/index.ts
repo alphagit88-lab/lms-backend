@@ -30,9 +30,15 @@ import examRoutes from "./routes/examRoutes";
 import questionRoutes from "./routes/questionRoutes";
 import submissionRoutes from "./routes/submissionRoutes";
 import gradingRoutes from "./routes/gradingRoutes";
+import notificationRoutes from "./routes/notificationRoutes";
+import progressReportRoutes from "./routes/progressReportRoutes";
+import analyticsRoutes from "./routes/analyticsRoutes";
 import { RecordingFetchJob } from "./jobs/RecordingFetchJob";
 import { startPayoutJob } from "./jobs/PayoutJob";
 import { startBookingCleanupJob } from "./jobs/BookingCleanupJob";
+import { startReminderJob } from "./jobs/ReminderJob";
+import { startParentReportJob } from "./jobs/ParentReportJob";
+import { startPerformanceAlertJob } from "./jobs/PerformanceAlertJob";
 
 dotenv.config();
 
@@ -114,6 +120,9 @@ app.use("/api/exams", examRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/submissions", submissionRoutes);
 app.use("/api/grading", gradingRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/progress-reports", progressReportRoutes);
+app.use("/api/analytics", analyticsRoutes);
 app.use("/api", userRoutes);
 
 // Initialize Database and Start Server
@@ -129,6 +138,9 @@ AppDataSource.initialize()
       RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
       startPayoutJob();
       startBookingCleanupJob();
+      startReminderJob();
+      startParentReportJob();
+      startPerformanceAlertJob();
     });
   })
   .catch((error) => {

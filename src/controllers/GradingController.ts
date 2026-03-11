@@ -7,6 +7,8 @@ import { Logger } from "../utils/logger";
 import { IsNull, Not } from "typeorm";
 import { OCRService } from "../services/OCRService";
 import { PDFService } from "../services/PDFService";
+import { NotificationService } from "../services/NotificationService";
+import { User } from "../entities/User";
 
 export class GradingController {
     /**
@@ -17,6 +19,7 @@ export class GradingController {
         try {
             const examId = req.params.examId as string;
             const userId = req.session.userId!;
+            const userRole = req.session.userRole;
 
             const examRepo = AppDataSource.getRepository(Exam);
             const exam = await examRepo.findOne({
@@ -25,8 +28,10 @@ export class GradingController {
             });
 
             if (!exam) return res.status(404).json({ error: "Exam not found." });
-            if (exam.createdById !== userId) {
-                return res.status(403).json({ error: "Only the exam creator can view submissions." });
+
+            // Allow creator OR admin
+            if (exam.createdById !== userId && userRole !== "admin") {
+                return res.status(403).json({ error: "Only the exam creator or admin can view submissions." });
             }
 
             // Get all master submissions (questionId is null = master record)
@@ -101,6 +106,7 @@ export class GradingController {
         try {
             const submissionId = req.params.submissionId as string;
             const userId = req.session.userId!;
+            const userRole = req.session.userRole;
             const { marksAwarded, feedback } = req.body;
 
             if (marksAwarded === undefined || marksAwarded === null) {
@@ -114,8 +120,10 @@ export class GradingController {
             });
 
             if (!submission) return res.status(404).json({ error: "Submission not found." });
-            if (submission.exam.createdById !== userId) {
-                return res.status(403).json({ error: "Only the exam creator can grade answers." });
+
+            // Allow creator OR admin
+            if (submission.exam.createdById !== userId && userRole !== "admin") {
+                return res.status(403).json({ error: "Only the exam creator or admin can grade answers." });
             }
 
             submission.marksAwarded = Number(marksAwarded);
@@ -150,6 +158,7 @@ export class GradingController {
         try {
             const submissionId = req.params.submissionId as string;
             const userId = req.session.userId!;
+            const userRole = req.session.userRole;
             const { overallFeedback } = req.body;
 
             const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
@@ -161,8 +170,10 @@ export class GradingController {
             if (!masterSubmission) {
                 return res.status(404).json({ error: "Master submission not found." });
             }
-            if (masterSubmission.exam.createdById !== userId) {
-                return res.status(403).json({ error: "Only the exam creator can finalize grading." });
+
+            // Allow creator OR admin
+            if (masterSubmission.exam.createdById !== userId && userRole !== "admin") {
+                return res.status(403).json({ error: "Only the exam creator or admin can finalize grading." });
             }
 
             // Sum up all individual answer marks
@@ -210,13 +221,16 @@ export class GradingController {
         try {
             const examId = req.params.examId as string;
             const userId = req.session.userId!;
+            const userRole = req.session.userRole;
 
             const examRepo = AppDataSource.getRepository(Exam);
             const exam = await examRepo.findOne({ where: { id: examId } });
 
             if (!exam) return res.status(404).json({ error: "Exam not found." });
-            if (exam.createdById !== userId) {
-                return res.status(403).json({ error: "Only the exam creator can publish scores." });
+
+            // Allow creator OR admin
+            if (exam.createdById !== userId && userRole !== "admin") {
+                return res.status(403).json({ error: "Only the exam creator or admin can publish scores." });
             }
 
             // Update all master submissions to GRADED + set showCorrectAnswers
@@ -233,6 +247,24 @@ export class GradingController {
             // Enable showCorrectAnswers on the exam
             exam.showCorrectAnswers = true;
             await examRepo.save(exam);
+
+            // Notify each graded student (fire-and-forget)
+            const gradedMasters = await AppDataSource.getRepository(AnswerSubmission).find({
+                where: { examId, questionId: IsNull(), status: SubmissionStatus.GRADED },
+                relations: ["student"],
+            });
+            const userRepo = AppDataSource.getRepository(User);
+            for (const master of gradedMasters) {
+                if (!master.student) continue;
+                void NotificationService.notifyGradePublished(
+                    exam.title,
+                    exam.id,
+                    master.studentId,
+                    master.student,
+                    Number(master.marksAwarded) || 0,
+                    exam.totalMarks
+                );
+            }
 
             return res.json({
                 message: "Exam scores published successfully.",
@@ -347,6 +379,7 @@ export class GradingController {
         try {
             const submissionId = req.params.submissionId as string;
             const userId = req.session.userId!;
+            const userRole = req.session.userRole;
 
             const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
             const submission = await submissionRepo.findOne({
@@ -355,8 +388,10 @@ export class GradingController {
             });
 
             if (!submission) return res.status(404).json({ error: "Submission not found." });
-            if (submission.exam.createdById !== userId) {
-                return res.status(403).json({ error: "Only the exam creator can trigger OCR." });
+
+            // Allow creator OR admin
+            if (submission.exam.createdById !== userId && userRole !== "admin") {
+                return res.status(403).json({ error: "Only the exam creator or admin can trigger OCR." });
             }
             if (!submission.uploadUrl) {
                 return res.status(400).json({ error: "No upload found for this submission." });

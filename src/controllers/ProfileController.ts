@@ -133,6 +133,28 @@ export class ProfileController {
   };
 
   // Get Teacher Profile (Public)
+  // Get own teacher profile using session (authenticated instructor)
+  static getMyTeacherProfile = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const teacherId = req.session.userId!;
+
+      const profileRepository = AppDataSource.getRepository(TeacherProfile);
+      const profile = await profileRepository.findOne({
+        where: { teacherId },
+        relations: ["teacher"],
+      });
+
+      if (!profile) {
+        return res.status(404).json({ error: "Teacher profile not found" });
+      }
+
+      return res.json({ profile });
+    } catch (error: any) {
+      console.error("Error fetching own teacher profile:", error);
+      return res.status(500).json({ error: "Failed to fetch teacher profile" });
+    }
+  };
+
   static getTeacherProfile = async (req: Request, res: Response): Promise<Response> => {
     try {
       const teacherId = req.params.teacherId as string;
