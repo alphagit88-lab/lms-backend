@@ -212,4 +212,76 @@ export class EmailService {
     `);
     await EmailService.sendEmail(opts.to, `📊 Weekly Progress Report: ${opts.studentName} — LMS`, html);
   }
+
+  static async sendPerformanceAlert(opts: {
+    to: string;
+    recipientName: string;
+    alertType: "low_score" | "low_attendance" | "inactive";
+    studentName: string;
+    detail: string;
+    suggestion: string;
+    isParentCopy?: boolean;
+  }): Promise<void> {
+    const alertMeta: Record<string, { tag: string; tagClass: string; icon: string; headline: string }> = {
+      low_score:      { tag: "Low Score Alert",     tagClass: "tag-danger",  icon: "📉", headline: "Exam performance needs attention" },
+      low_attendance: { tag: "Attendance Alert",    tagClass: "tag-warning", icon: "📅", headline: "Attendance below required threshold" },
+      inactive:       { tag: "Inactivity Alert",    tagClass: "tag-warning", icon: "👋", headline: "No recent platform activity" },
+    };
+    const meta = alertMeta[opts.alertType] ?? alertMeta.inactive;
+    const forWhom = opts.isParentCopy
+      ? `your child <strong>${opts.studentName}</strong>`
+      : "you";
+
+    const html = baseLayout(`
+      <span class="tag ${meta.tagClass}">${meta.tag}</span>
+      <h2 style="margin:18px 0 6px;font-size:20px;color:#1e293b">${meta.icon} ${meta.headline}</h2>
+      <p style="color:#64748b;margin:0 0 20px;font-size:14px">Hi ${opts.recipientName}, we wanted to flag a performance concern for ${forWhom}.</p>
+      <table class="detail">
+        <tr><td>Alert Type</td><td>${meta.tag}</td></tr>
+        <tr><td>Detail</td><td>${opts.detail}</td></tr>
+        <tr><td>Suggestion</td><td style="color:#1e40af">${opts.suggestion}</td></tr>
+      </table>
+      <a href="/dashboard" class="btn">Go to Dashboard</a>
+      <p style="color:#94a3b8;font-size:11px;margin-top:20px">This is an automated alert from LMS. If you need support, please contact your teacher.</p>
+    `);
+    await EmailService.sendEmail(opts.to, `${meta.icon} Performance Alert — LMS`, html);
+  }
+
+  static async sendProgressReportShare(opts: {
+    to: string;
+    parentName: string;
+    studentName: string;
+    periodStart: string;
+    periodEnd: string;
+    avgScore?: number;
+    attendancePct?: number;
+    sessionsAttended?: number;
+    trend?: string;
+    remarks?: string;
+    strengths?: string;
+    areasForImprovement?: string;
+    teacherName: string;
+    courseName?: string;
+  }): Promise<void> {
+    const trendIcon = opts.trend === "improving" ? "📈" : opts.trend === "declining" ? "📉" : "➡️";
+    const html = baseLayout(`
+      <span class="tag tag-info">Progress Report</span>
+      <h2 style="margin:18px 0 6px;font-size:20px;color:#1e293b">📋 Progress Report for ${opts.studentName}</h2>
+      <p style="color:#64748b;margin:0 0 20px;font-size:14px">Hi ${opts.parentName}, ${opts.studentName}'s teacher has shared a progress report with you.</p>
+      <table class="detail">
+        ${opts.courseName ? `<tr><td>Course</td><td>${opts.courseName}</td></tr>` : ""}
+        <tr><td>Period</td><td>${opts.periodStart} – ${opts.periodEnd}</td></tr>
+        <tr><td>Teacher</td><td>${opts.teacherName}</td></tr>
+        ${opts.sessionsAttended !== undefined ? `<tr><td>Sessions Attended</td><td>${opts.sessionsAttended}</td></tr>` : ""}
+        ${opts.attendancePct !== undefined ? `<tr><td>Attendance</td><td>${Number(opts.attendancePct).toFixed(1)}%</td></tr>` : ""}
+        ${opts.avgScore !== undefined ? `<tr><td>Average Score</td><td>${Number(opts.avgScore).toFixed(1)}%</td></tr>` : ""}
+        ${opts.trend ? `<tr><td>Trend</td><td>${trendIcon} ${opts.trend}</td></tr>` : ""}
+        ${opts.strengths ? `<tr><td>Strengths</td><td style="color:#166534">${opts.strengths}</td></tr>` : ""}
+        ${opts.areasForImprovement ? `<tr><td>Areas to Improve</td><td style="color:#b45309">${opts.areasForImprovement}</td></tr>` : ""}
+        ${opts.remarks ? `<tr><td>Teacher Remarks</td><td>${opts.remarks}</td></tr>` : ""}
+      </table>
+      <a href="/parent/dashboard" class="btn">View Full Dashboard</a>
+    `);
+    await EmailService.sendEmail(opts.to, `📋 Progress Report: ${opts.studentName} — LMS`, html);
+  }
 }

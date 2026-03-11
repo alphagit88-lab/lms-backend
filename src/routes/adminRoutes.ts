@@ -1,6 +1,8 @@
 import { Router } from "express";
+import express from "express";
 import { AdminController } from "../controllers/AdminController";
 import { authenticate, isAdmin } from "../middleware/authMiddleware";
+import { paymentController } from "../controllers/PaymentController";
 
 const router = Router();
 
@@ -27,6 +29,9 @@ router.post("/payouts/:id/process", AdminController.processPayout);
 
 // Payments & Enrollments
 router.get("/payments", AdminController.getPayments);
+router.get("/payments/bank-transfer/pending", paymentController.getPendingManualPayments.bind(paymentController));
+router.post("/payments/bank-transfer/:paymentId/review", express.json(), paymentController.reviewManualPayment.bind(paymentController));
+router.post("/payments/:paymentId/confirm", express.json(), paymentController.manualConfirm);
 router.get("/enrollments", AdminController.getEnrollments);
 
 // Parent Management

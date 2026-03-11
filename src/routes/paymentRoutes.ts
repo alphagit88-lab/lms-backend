@@ -34,6 +34,9 @@ router.get("/history", authenticate, paymentController.getMyPayments);
 router.get("/transactions", authenticate, paymentController.getTransactions);
 router.get("/earnings", authenticate, paymentController.getTeacherEarnings);
 
+// Refund request — students for own booking payments, admin for any payment
+router.post("/refund", authenticate, express.json(), paymentController.processRefund.bind(paymentController));
+
 // Manual payment confirmation (Admin only — for dev/localhost use)
 router.post(
     "/:paymentId/confirm",

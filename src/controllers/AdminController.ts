@@ -357,10 +357,16 @@ export class AdminController {
       const pageSize = parseInt(limit as string, 10);
 
       const qb = paymentRepository.createQueryBuilder("p")
-        .leftJoinAndSelect("p.user", "student");
+        .leftJoinAndSelect("p.user", "student")
+        .leftJoinAndSelect("p.recipient", "recipient");
 
       if (status) {
         qb.andWhere("p.paymentStatus = :status", { status });
+      }
+
+      const { method } = req.query;
+      if (method) {
+        qb.andWhere("p.paymentMethod = :method", { method });
       }
 
       const [payments, total] = await qb
@@ -385,14 +391,26 @@ export class AdminController {
         studentId: p.userId,
         courseId: p.paymentType === PaymentType.COURSE_ENROLLMENT ? p.referenceId : null,
         amount: p.amount,
+        currency: p.currency,
+        paymentMethod: p.paymentMethod,
+        paymentType: p.paymentType,
         status: p.paymentStatus.toUpperCase(),
+        paymentStatus: p.paymentStatus,
+        refundAmount: p.refundAmount ?? null,
+        refundDate: p.refundDate ?? null,
         transactionId: p.transactionId ?? null,
+        bankSlipUrl: p.bankSlipUrl ?? null,
         createdAt: p.createdAt,
         student: {
           firstName: p.user?.firstName ?? '',
           lastName: p.user?.lastName ?? '',
           email: p.user?.email ?? '',
         },
+        instructor: p.recipient ? {
+          firstName: p.recipient.firstName,
+          lastName: p.recipient.lastName,
+          email: p.recipient.email,
+        } : null,
         course: p.paymentType === PaymentType.COURSE_ENROLLMENT
           ? (courseMap.get(p.referenceId) ?? null)
           : null,

@@ -28,6 +28,8 @@ export enum NotificationType {
   MESSAGE_RECEIVED = "message_received",
   COURSE_ENROLLED = "course_enrolled",
   SESSION_STARTED = "session_started",
+  PERFORMANCE_ALERT = "performance_alert",
+  PAYMENT_REFUNDED = "payment_refunded",
   GENERAL = "general",
 }
 

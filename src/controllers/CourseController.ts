@@ -490,8 +490,8 @@ export class CourseController {
           .json({ error: "Not authorized to publish this course" });
       }
 
-      // Validate course has lessons before publishing
-      if (isPublished && (!course.lessons || course.lessons.length === 0)) {
+      // Validate course has lessons before publishing (instructors only; admins can override)
+      if (isPublished && !isAdmin && (!course.lessons || course.lessons.length === 0)) {
         return res
           .status(400)
           .json({ error: "Cannot publish course without lessons" });

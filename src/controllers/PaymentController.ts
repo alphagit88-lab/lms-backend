@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import paymentService from "../services/PaymentService";
 import payhereService, { PAYHERE_STATUS } from "../services/PayHereService";
+import { refundService } from "../services/RefundService";
 import { Payment, PaymentStatus, PaymentType } from "../entities/Payment";
 import { TransactionType } from "../entities/Transaction";
 import { NotificationService } from "../services/NotificationService";
@@ -330,6 +331,74 @@ export class PaymentController {
             return res.json({ message: `Payment ${action}d successfully.`, payment });
         } catch (error: any) {
             return res.status(500).json({ error: error.message || "Failed to review payment." });
+        }
+    }
+
+    /**
+     * POST /api/payments/refund
+     * Request a refund for a completed payment.
+     *
+     * Body (JSON):
+     *   { paymentId: string, reason: string, refundPercentage?: number }
+     *
+     * - Students: can only refund their own booking payments; percentage auto-calculated.
+     * - Admins: can refund any payment and override the percentage (0–100).
+     *
+     * Note: PayHere does not provide an automated refund API.
+     * The actual money transfer is processed manually in the PayHere Merchant Portal.
+     * This endpoint records the refund decision and notifies the student.
+     */
+    async processRefund(req: Request, res: Response) {
+        try {
+            const { paymentId, reason, refundPercentage } = req.body as {
+                paymentId?: string;
+                reason?: string;
+                refundPercentage?: number;
+            };
+
+            if (!paymentId || typeof paymentId !== "string") {
+                return res.status(400).json({ error: "paymentId is required." });
+            }
+            if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
+                return res.status(400).json({ error: "reason is required." });
+            }
+            if (refundPercentage !== undefined && (typeof refundPercentage !== "number" || refundPercentage < 0 || refundPercentage > 100)) {
+                return res.status(400).json({ error: "refundPercentage must be a number between 0 and 100." });
+            }
+
+            const result = await refundService.processRefund({
+                paymentId,
+                requestedByUserId: req.session.userId!,
+                requestedByRole: req.session.userRole!,
+                reason: reason.trim(),
+                refundPercentage,
+            });
+
+            return res.json({
+                message: result.message,
+                refundAmount: result.refundAmount,
+                refundPercentage: result.refundPercentage,
+                payment: {
+                    id: result.payment.id,
+                    paymentStatus: result.payment.paymentStatus,
+                    refundAmount: result.payment.refundAmount,
+                    refundDate: result.payment.refundDate,
+                },
+            });
+        } catch (error: any) {
+            const msg: string = error.message || "Failed to process refund.";
+            // Return 403 for access-denied errors, 422 for policy errors, 404 for not-found
+            if (msg.includes("Access denied")) return res.status(403).json({ error: msg });
+            if (msg.includes("not found")) return res.status(404).json({ error: msg });
+            if (
+                msg.includes("cannot be refunded") ||
+                msg.includes("No refund is applicable") ||
+                msg.includes("must be reviewed") ||
+                msg.includes("must supply refundPercentage")
+            ) {
+                return res.status(422).json({ error: msg });
+            }
+            return res.status(500).json({ error: msg });
         }
     }
 }
