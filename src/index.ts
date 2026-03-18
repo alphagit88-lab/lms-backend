@@ -47,6 +47,19 @@ const app: Application = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+app.use(async (req: Request, res: Response, next) => {
+  if (!AppDataSource.isInitialized) {
+    try {
+      await AppDataSource.initialize();
+      console.log("✓ Database connected successfully (Serverless)");
+    } catch (error) {
+      console.error("✗ Database connection failed:", error);
+      return res.status(500).json({ error: "Database connection failed" });
+    }
+  }
+  next();
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || "http://localhost:3000",
   credentials: true,
@@ -126,28 +139,30 @@ app.use("/api/progress-reports", progressReportRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api", userRoutes);
 
-// Initialize Database and Start Server
-AppDataSource.initialize()
-  .then(() => {
-    console.log("✓ Database connected successfully");
+if (!process.env.VERCEL) {
+  // Initialize Database and Start Server
+  AppDataSource.initialize()
+    .then(() => {
+      console.log("✓ Database connected successfully");
 
-    app.listen(PORT, () => {
-      console.log(`✓ Server is running on port ${PORT}`);
-      console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+      app.listen(PORT, () => {
+        console.log(`✓ Server is running on port ${PORT}`);
+        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
 
-      // Start background jobs
-      RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
-      startPayoutJob();
-      startBookingCleanupJob();
-      startReminderJob();
-      startParentReportJob();
-      startPerformanceAlertJob();
+        // Start background jobs
+        RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
+        startPayoutJob();
+        startBookingCleanupJob();
+        startReminderJob();
+        startParentReportJob();
+        startPerformanceAlertJob();
+      });
+    })
+    .catch((error) => {
+      console.error("✗ Database connection failed:", error);
+      process.exit(1);
     });
-  })
-  .catch((error) => {
-    console.error("✗ Database connection failed:", error);
-    process.exit(1);
-  });
+}
 
 export default app;
 
