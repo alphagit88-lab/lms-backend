@@ -423,7 +423,6 @@ export class CourseController {
 
       const course = await courseRepository.findOne({
         where: { id: id as string },
-        relations: ["enrollments", "lessons"],
       });
 
       if (!course) {
@@ -438,14 +437,6 @@ export class CourseController {
         return res
           .status(403)
           .json({ error: "Not authorized to delete this course" });
-      }
-
-      // Check if course has enrollments
-      if (course.enrollments && course.enrollments.length > 0) {
-        return res.status(400).json({
-          error: "Cannot delete course with existing enrollments",
-          enrollmentsCount: course.enrollments.length,
-        });
       }
 
       await courseRepository.remove(course);
