@@ -34,6 +34,7 @@ export const authenticate = (
  */
 export const authorize = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
+    console.log(`[Authorize] Path: ${req.originalUrl}, Required: [${roles.join(", ")}], SessionRole: '${req.session.userRole}'`);
     if (!req.session.userId) {
       return res.status(401).json({
         error: "Authentication required",
@@ -48,10 +49,12 @@ export const authorize = (...roles: string[]) => {
       });
     }
 
-    if (!roles.includes(req.session.userRole)) {
+    const userRole = req.session.userRole?.trim();
+    if (!userRole || !roles.some(r => r.toLowerCase() === userRole.toLowerCase())) {
+      console.warn(`[Authorize] Access denied for user ${req.session.userId} (${req.session.userEmail}). Role in session: '${userRole}'. Required one of: [${roles.join(", ")}]`);
       return res.status(403).json({
         error: "Access denied",
-        message: `This resource requires one of the following roles: ${roles.join(
+        message: `[DEBUG_AUTH] This resource requires one of the following roles: ${roles.join(
           ", "
         )}`,
       });
@@ -195,6 +198,11 @@ export const isInstructorOrAdmin = authorize("instructor", "admin");
  * This includes instructors and admins who can also enroll in courses
  */
 export const isStudent = authenticate;
+
+/**
+ * Middleware to check if user is instructor
+ */
+export const isInstructor = authorize("instructor");
 
 /**
  * Middleware to check if user is parent

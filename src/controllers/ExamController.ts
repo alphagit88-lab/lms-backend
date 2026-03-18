@@ -9,7 +9,10 @@ import { Question, QuestionType } from "../entities/Question";
 import { QuestionOption } from "../entities/QuestionOption";
 import { Logger } from "../utils/logger";
 import { IsNull } from "typeorm";
-import { UploadApiResponse, v2 as cloudinary } from "cloudinary";
+import { OCRService } from "../services/OCRService";
+import * as fs from "fs";
+import * as path from "path";
+import { randomUUID } from "crypto";
 
 export class ExamController {
     /**
@@ -400,32 +403,55 @@ export class ExamController {
                 return res.status(400).json({ error: "Handwritten uploads are only permitted for Essay/Short Answer questions." });
             }
 
-            // Upload to Cloudinary using secure stream
-            // Buffer to Cloudinary upload
-            const buffer = req.file.buffer;
+            // ── Local disk storage (replaces Cloudinary — no API key required) ─────
+            const uploadBaseDir = process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
+            const answerDir = path.join(uploadBaseDir, "answers", examId, studentId);
 
-            const uploadPromise = new Promise<{ uploadUrl: string }>((resolve, reject) => {
-                const stream = cloudinary.uploader.upload_stream(
-                    { folder: `lms/exams/${examId}/answers/${studentId}` },
-                    (error: any, result: any) => {
-                        if (error) {
-                            reject(error);
-                        } else if (result) {
-                            resolve({ uploadUrl: result.secure_url });
-                        } else {
-                            reject(new Error("Cloudinary returned a null response."));
-                        }
-                    }
-                );
-                stream.end(buffer);
+            // Ensure directory exists
+            if (!fs.existsSync(answerDir)) {
+                fs.mkdirSync(answerDir, { recursive: true });
+            }
+
+            const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+            const fileName = `${randomUUID()}${ext}`;
+            const filePath = path.join(answerDir, fileName);
+
+            // Write buffer to disk
+            await fs.promises.writeFile(filePath, req.file.buffer);
+
+            // Build a URL accessible via express.static (index.ts: app.use("/uploads", express.static(uploadDir)))
+            const uploadUrl = `/uploads/answers/${examId}/${studentId}/${fileName}`;
+            // ─────────────────────────────────────────────────────────────────────
+
+            // Issue 4 Fix: Auto-trigger OCR as a fire-and-forget background task immediately after upload.
+            // This ensures OCR text is pre-computed by the time the teacher opens the grading view.
+            // Map LMS language to Tesseract lang code (eng / sin / tam)
+            const langMap: Record<string, string> = { english: "eng", sinhala: "sin", tamil: "tam" };
+            const tesseractLang = langMap[(exam.language ?? "").toLowerCase()] ?? "eng";
+
+            // We need a submission record to attach the OCR text to.
+            // Look for an existing DRAFT answer record for this student/question.
+            const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
+            const existingAnswer = await submissionRepo.findOne({
+                where: { examId, questionId, studentId }
             });
 
-            const uploadResult = await uploadPromise;
+            if (existingAnswer) {
+                // Trigger OCR in background — do NOT await, so the upload response returns immediately.
+                OCRService.extractText(uploadUrl, tesseractLang)
+                    .then(async (ocrText) => {
+                        await submissionRepo.update(existingAnswer.id, { ocrText });
+                        Logger.info(`OCR auto-trigger: submission ${existingAnswer.id} updated with ${ocrText.length} chars (lang: ${tesseractLang})`);
+                    })
+                    .catch((err) => Logger.error(`OCR auto-trigger failed for submission ${existingAnswer.id}:`, err));
+            } else {
+                Logger.info(`OCR auto-trigger skipped: no existing submission record found for student ${studentId} / question ${questionId}. OCR will run on grading view.`);
+            }
 
             return res.status(200).json({
                 message: "Handwritten answer uploaded successfully",
                 questionId: question.id,
-                uploadUrl: uploadResult.uploadUrl
+                uploadUrl
             });
 
         } catch (error) {

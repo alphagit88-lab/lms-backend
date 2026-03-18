@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import path from "path";
+import fs from "fs";
 import { AppDataSource } from "../config/data-source";
 import { Course } from "../entities/Course";
 import { User } from "../entities/User";
@@ -323,7 +325,7 @@ export class CourseController {
         level,
         medium,
         price,
-        thumbnailUrl,
+        thumbnail,
         previewVideoUrl,
         status,
         isPublished,
@@ -380,7 +382,7 @@ export class CourseController {
       if (level !== undefined) course.level = level;
       if (medium !== undefined) course.medium = medium;
       if (price !== undefined) course.price = price;
-      if (thumbnailUrl !== undefined) course.thumbnail = thumbnailUrl;
+      if (thumbnail !== undefined) course.thumbnail = thumbnail;
       if (previewVideoUrl !== undefined)
         course.previewVideoUrl = previewVideoUrl;
       if (status !== undefined) course.status = status;
@@ -490,13 +492,6 @@ export class CourseController {
           .json({ error: "Not authorized to publish this course" });
       }
 
-      // Validate course has lessons before publishing (instructors only; admins can override)
-      if (isPublished && !isAdmin && (!course.lessons || course.lessons.length === 0)) {
-        return res
-          .status(400)
-          .json({ error: "Cannot publish course without lessons" });
-      }
-
       course.isPublished = isPublished;
       if (isPublished) {
         course.status = "published";
@@ -511,6 +506,56 @@ export class CourseController {
     } catch (error) {
       console.error("Toggle publish error:", error);
       res.status(500).json({ error: "Failed to update course status" });
+    }
+  }
+
+  /**
+   * Upload course media (thumbnail or preview video)
+   * POST /api/courses/upload-media
+   */
+  static async uploadMedia(req: Request, res: Response) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      // The file was saved successfully by multer. We return the URL.
+      const fileUrl = `/uploads/course-media/${req.file.filename}`;
+      res.json({ message: "File uploaded successfully", url: fileUrl });
+    } catch (error) {
+      console.error("Upload course media error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  }
+
+  /**
+   * Delete course media
+   * DELETE /api/courses/delete-media
+   */
+  static async deleteMedia(req: Request, res: Response) {
+    try {
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ error: "No URL provided" });
+      }
+
+      // Check if it's a local file and starts with the upload prefix
+      // We check for the filename only to be safe
+      if (url.includes("/uploads/course-media/")) {
+        const urlParts = url.split("/");
+        const filename = urlParts[urlParts.length - 1];
+        
+        // Basic security check: ensure it's just a filename, no path traversal
+        if (filename && !filename.includes("..")) {
+          const filePath = path.join(process.cwd(), "uploads", "course-media", filename);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        }
+      }
+      res.json({ message: "Media removed successfully" });
+    } catch (error) {
+      console.error("Delete course media error:", error);
+      res.status(500).json({ error: "Failed to remove file" });
     }
   }
 }

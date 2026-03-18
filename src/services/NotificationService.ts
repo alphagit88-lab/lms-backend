@@ -1,4 +1,6 @@
 import { AppDataSource } from "../config/data-source";
+import { Course } from "../entities/Course";
+import { In } from "typeorm";
 import {
   Notification,
   NotificationChannel,
@@ -179,6 +181,81 @@ export class NotificationService {
       description: payment.paymentType,
       paidAt,
     });
+  }
+
+  // ─── Payment Event Notifications (Instructor & Admin) ──────────────────────
+
+  static async notifyPaymentEvent(payment: Payment, payer: User, eventType: "new_slip" | "success" | "payhere_intent"): Promise<void> {
+    const amount = Number(payment.amount).toFixed(2);
+    const currency = payment.currency || "LKR";
+    
+    let title = "";
+    let message = "";
+    let type: NotificationType = NotificationType.GENERAL;
+
+    if (eventType === "new_slip") {
+      title = "New Bank Slip Uploaded";
+      message = `${payer.firstName} ${payer.lastName} uploaded a bank slip for ${currency} ${amount}. Needs review.`;
+      type = NotificationType.GENERAL;
+    } else if (eventType === "success") {
+      title = "Payment Received";
+      message = `${payer.firstName} ${payer.lastName} made a payment of ${currency} ${amount}.`;
+      type = NotificationType.PAYMENT_SUCCESS;
+    } else if (eventType === "payhere_intent") {
+      title = "New Online Payment Initiated";
+      message = `${payer.firstName} ${payer.lastName} initiated an online payment of ${currency} ${amount}. Please check transaction.`;
+      type = NotificationType.GENERAL;
+    }
+
+    // 1. Notify Instructor(s) (if applicable)
+    const instructorIds = new Set<string>();
+
+    if (payment.recipientId) {
+      instructorIds.add(payment.recipientId);
+    } else if (payment.paymentType === "course_enrollment" && payment.referenceId) {
+       const course = await AppDataSource.getRepository(Course).findOne({ where: { id: payment.referenceId } });
+       if (course && course.instructorId) {
+         instructorIds.add(course.instructorId);
+       }
+    } else if (payment.paymentType === "booking_session" && payment.referenceId) {
+       // Only fetch if recipientId was null just in case
+       const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: payment.referenceId } });
+       if (booking && booking.teacherId) {
+         instructorIds.add(booking.teacherId);
+       }
+    } else if (payment.paymentType === "bulk_course_enrollment" && payment.metadata && Array.isArray(payment.metadata.courseIds)) {
+       const courses = await AppDataSource.getRepository(Course).find({ 
+         where: { id: In(payment.metadata.courseIds) },
+         select: ["instructorId"] 
+       });
+       courses.forEach((c: any) => {
+         if (c.instructorId) instructorIds.add(c.instructorId);
+       });
+    }
+
+    for (const instructorId of Array.from(instructorIds)) {
+       await NotificationService.createInApp(
+         instructorId,
+         type,
+         title,
+         message,
+         payment.id,
+         "/instructor/transactions"
+       );
+    }
+
+    // 2. Notify Admins
+    const admins = await AppDataSource.getRepository(User).find({ where: { role: "admin" } });
+    for (const admin of admins) {
+       await NotificationService.createInApp(
+         admin.id,
+         type,
+         title,
+         message,
+         payment.id,
+         "/admin/payments"
+       );
+    }
   }
 
   // ─── Grade Published ───────────────────────────────────────────────────────

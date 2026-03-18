@@ -9,34 +9,51 @@ import { User } from "../entities/User";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
 import ZoomService from "../services/ZoomService";
 import { Logger } from "../utils/logger";
+import { isZoomFreePlan, ZOOM_MAX_FREE_DURATION_MINUTES } from "../config/zoomConfig";
 
 export class SessionController {
     /**
-     * Get upcoming sessions for the current user
+     * Get upcoming sessions for the current user (convenience wrapper)
      */
     static getUpcomingSessions = async (req: Request, res: Response): Promise<Response> => {
+        req.query.type = "upcoming";
+        return SessionController.getSessions(req, res);
+    };
+    
+    /**
+     * Get sessions for the current user (with filters)
+     */
+    static getSessions = async (req: Request, res: Response): Promise<Response> => {
         try {
             const userId = req.session.userId!;
             const userRole = req.session.userRole;
+            const { type, status, limit } = req.query;
 
             const sessionRepo = AppDataSource.getRepository(Session);
             const query = sessionRepo.createQueryBuilder("session")
                 .leftJoinAndSelect("session.class", "class")
-                .leftJoinAndSelect("session.booking", "booking")
-                .where("session.startTime > :now", { now: new Date() })
-                .andWhere("session.status != :status", { status: SessionStatus.CANCELLED });
+                .leftJoinAndSelect("session.booking", "booking");
+
+            // Type filter: upcoming or past
+            if (type === "upcoming") {
+                query.andWhere("session.startTime > :now", { now: new Date() });
+            } else if (type === "past") {
+                query.andWhere("session.startTime <= :now", { now: new Date() });
+            }
+
+            // Status filter
+            if (status) {
+                query.andWhere("session.status = :status", { status });
+            } else {
+                query.andWhere("session.status != :cancelled", { cancelled: SessionStatus.CANCELLED });
+            }
 
             if (userRole === "instructor") {
-                // Instructor sees sessions for their classes, their bookings, or ones they created
                 query.andWhere(
                     "(class.teacherId = :userId OR booking.teacherId = :userId OR session.teacherId = :userId)",
                     { userId }
                 );
             } else if (userRole === "student") {
-                // Student sees sessions:
-                //   1. Directly booked for them
-                //   2. For classes linked to courses they are enrolled in
-                //   3. Ad-hoc sessions created by instructors of their enrolled courses
                 const enrollmentRepo = AppDataSource.getRepository(Enrollment);
                 const enrollments = await enrollmentRepo.find({
                     where: { studentId: userId, status: "active" },
@@ -45,7 +62,6 @@ export class SessionController {
                 const enrolledCourseIds = enrollments.map(e => e.courseId);
 
                 if (enrolledCourseIds.length > 0) {
-                    // Get instructor IDs for all enrolled courses
                     const courses = await AppDataSource.getRepository(Course).find({
                         where: enrolledCourseIds.map(id => ({ id })),
                         select: ["instructorId"],
@@ -68,14 +84,18 @@ export class SessionController {
                 }
             }
 
+            if (limit) {
+                query.limit(Number(limit));
+            }
+
             const sessions = await query
-                .orderBy("session.startTime", "ASC")
+                .orderBy("session.startTime", type === "upcoming" ? "ASC" : "DESC")
                 .getMany();
 
             return res.json({ sessions });
         } catch (error) {
-            Logger.error("Error fetching upcoming sessions:", error);
-            return res.status(500).json({ error: "Failed to fetch upcoming sessions" });
+            Logger.error("Error fetching sessions:", error);
+            return res.status(500).json({ error: "Failed to fetch sessions" });
         }
     };
 
@@ -192,6 +212,13 @@ export class SessionController {
                 return res.status(400).json({ error: "endTime must be after startTime" });
             }
 
+            const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+            if (shouldCreateZoom && isZoomFreePlan() && durationMinutes > ZOOM_MAX_FREE_DURATION_MINUTES) {
+                return res.status(400).json({
+                    error: `For Zoom free accounts, sessions with an auto-created Zoom meeting must be ${ZOOM_MAX_FREE_DURATION_MINUTES} minutes or less. Current duration: ${durationMinutes} minutes.`,
+                });
+            }
+
             // If classId supplied, verify the teacher owns it
             if (classId) {
                 const classEntry = await AppDataSource.getRepository(Class).findOne({ where: { id: classId } });
@@ -217,7 +244,11 @@ export class SessionController {
                     meetingPassword = zoomResp.password;
                 } catch (zoomError) {
                     Logger.error("Zoom meeting creation failed for ad-hoc session:", zoomError);
-                    // Non-fatal — session is still created without a meeting link
+                    
+                    // Return error to client so they know the Zoom link failed
+                    return res.status(500).json({ 
+                        error: "Failed to create Zoom meeting. Please check your Zoom integration or uncheck 'Auto-create Zoom meeting link'." 
+                    });
                 }
             }
 

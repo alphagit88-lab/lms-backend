@@ -25,6 +25,15 @@ export class SubmissionController {
             if (!exam) return res.status(404).json({ error: "Exam not found." });
             if (!exam.isPublished) return res.status(403).json({ error: "Exam is not published yet." });
 
+            // Issue 1 Fix: Enforce exam schedule — students cannot access exam before examDate
+            if (exam.examDate && new Date(exam.examDate) > new Date()) {
+                return res.status(403).json({
+                    error: "This exam has not started yet.",
+                    examDate: exam.examDate,
+                    message: `Exam begins on ${new Date(exam.examDate).toLocaleString()}`
+                });
+            }
+
             // Check if student already submitted maximum attempts
             const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
             const pastSubmissions = await submissionRepo.count({
@@ -83,6 +92,24 @@ export class SubmissionController {
             if (!exam) {
                 await queryRunner.rollbackTransaction();
                 return res.status(404).json({ error: "Exam not found." });
+            }
+
+            // Issue 1 Fix: Enforce exam schedule — cannot submit before exam starts
+            if (exam.examDate && new Date(exam.examDate) > new Date()) {
+                await queryRunner.rollbackTransaction();
+                return res.status(403).json({
+                    error: "This exam has not started yet.",
+                    examDate: exam.examDate
+                });
+            }
+
+            // Issue 1 Fix: Enforce submission deadline — cannot submit after deadline (unless late submission allowed)
+            if (exam.submissionDeadline && new Date(exam.submissionDeadline) < new Date() && !exam.allowLateSubmission) {
+                await queryRunner.rollbackTransaction();
+                return res.status(403).json({
+                    error: "The submission deadline has passed for this exam.",
+                    submissionDeadline: exam.submissionDeadline
+                });
             }
 
             const submissionRepo = queryRunner.manager.getRepository(AnswerSubmission);
@@ -198,6 +225,14 @@ export class SubmissionController {
 
             if (!exam) return res.status(404).json({ error: "Exam not found." });
             if (!exam.isPublished) return res.status(403).json({ error: "Exam is not published." });
+
+            // Issue 1 Fix: Enforce exam schedule — cannot save draft before exam starts
+            if (exam.examDate && new Date(exam.examDate) > new Date()) {
+                return res.status(403).json({
+                    error: "This exam has not started yet.",
+                    examDate: exam.examDate
+                });
+            }
 
             const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
 

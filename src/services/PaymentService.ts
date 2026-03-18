@@ -1,5 +1,5 @@
 import { AppDataSource } from "../config/data-source";
-import { In } from "typeorm";
+import { In, Brackets } from "typeorm";
 import { Payment, PaymentStatus, PaymentType, PaymentMethod } from "../entities/Payment";
 import { Transaction, TransactionType } from "../entities/Transaction";
 import payhereService, { PayHereCheckoutParams } from "./PayHereService";
@@ -8,6 +8,7 @@ import { CommissionService } from "./CommissionService";
 import { Enrollment } from "../entities/Enrollment";
 import { Booking, BookingStatus } from "../entities/Booking";
 import { Course } from "../entities/Course";
+import { TeacherProfile } from "../entities/TeacherProfile";
 
 class PaymentService {
     private paymentRepo = AppDataSource.getRepository(Payment);
@@ -57,20 +58,37 @@ class PaymentService {
         // Platform fee mapping using CommissionService
         const { platformFee } = CommissionService.calculate(amount);
 
-        let payment = this.paymentRepo.create({
-            userId,
-            amount,
-            platformFee,
-            currency,
-            paymentType: type,
-            referenceId,
-            recipientId,
-            paymentMethod: PaymentMethod.PAYHERE,
-            paymentStatus: PaymentStatus.PENDING,
+        // Check for an existing PENDING payment for this same reference to avoid duplicates
+        let payment = await this.paymentRepo.findOne({
+            where: {
+                userId,
+                paymentType: type,
+                referenceId,
+                paymentStatus: PaymentStatus.PENDING,
+                amount: amount // and same amount
+            }
         });
 
-        // Save payment entity to get a valid UUID — this UUID becomes the PayHere order_id
-        payment = await this.paymentRepo.save(payment);
+        if (!payment) {
+            payment = this.paymentRepo.create({
+                userId,
+                amount,
+                platformFee,
+                currency,
+                paymentType: type,
+                referenceId,
+                recipientId,
+                paymentMethod: PaymentMethod.PAYHERE,
+                paymentStatus: PaymentStatus.PENDING,
+            });
+            payment = await this.paymentRepo.save(payment);
+        } else {
+            // Update existing pending payment metadata just in case info changed
+            payment.recipientId = recipientId;
+            payment.platformFee = platformFee;
+            payment.currency = currency;
+            await this.paymentRepo.save(payment);
+        }
 
         try {
             // Free items bypass PayHere
@@ -79,7 +97,7 @@ class PaymentService {
                 payment.paymentDate = new Date();
                 await this.paymentRepo.save(payment);
 
-                await this.createTransactions(payment.id, userId, recipientId, amount, platformFee);
+                await this.createTransactions(payment.id, userId, recipientId, amount, platformFee, payment.paymentMethod);
 
                 return {
                     checkoutParams: null,
@@ -106,6 +124,10 @@ class PaymentService {
             // Store the gateway order reference (same as payment.id, but explicit)
             payment.gatewayOrderId = payment.id;
             await this.paymentRepo.save(payment);
+
+            const { NotificationService } = require("./NotificationService");
+            const payer = await AppDataSource.getRepository(User).findOne({ where: { id: userId } });
+            if (payer) void NotificationService.notifyPaymentEvent(payment, payer, "payhere_intent");
 
             return {
                 checkoutParams,
@@ -150,7 +172,8 @@ class PaymentService {
             payment.userId,
             payment.recipientId,
             payment.amount,
-            payment.platformFee
+            payment.platformFee,
+            payment.paymentMethod
         );
 
         // -- FULFILLMENT LOGIC --
@@ -196,17 +219,95 @@ class PaymentService {
                     }
                 }
             } else if (payment.paymentType === PaymentType.BOOKING_SESSION) {
-                // Confirm the booking
+                // Confirm the booking, respecting the teacher's auto-confirm setting
                 const booking = await this.bookingRepo.findOne({
-                    where: { id: payment.referenceId }
+                    where: { id: payment.referenceId },
+                    relations: ["teacher"]
                 });
 
                 if (booking && (booking.status === BookingStatus.PENDING_PAYMENT || booking.status === BookingStatus.PENDING)) {
-                    // Epic 2.7: Payment success -> CONFIRMED
-                    booking.status = BookingStatus.CONFIRMED;
+                    const teacherProfile = await AppDataSource.getRepository(TeacherProfile).findOne({
+                        where: { teacherId: booking.teacherId }
+                    });
+                    const shouldAutoConfirm = teacherProfile?.autoConfirmBookings === true;
+
+                    booking.status = shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
                     booking.paymentId = payment.id;
                     booking.paymentExpiresAt = undefined;
-                    await this.bookingRepo.save(booking);
+                    const savedBooking = await this.bookingRepo.save(booking);
+
+                    // -- FULFILLMENT: Zoom & Notifications --
+                    if (shouldAutoConfirm) {
+                        try {
+                            const { BookingController } = require("../controllers/BookingController");
+                            const { NotificationService } = require("./NotificationService");
+                            const teacherName = savedBooking.teacher ? `${savedBooking.teacher.firstName} ${savedBooking.teacher.lastName}` : "Teacher";
+                            await BookingController.createZoomMeetingForBooking(savedBooking, teacherName);
+
+                            const userRepo = AppDataSource.getRepository(User);
+                            const [student, teacher] = await Promise.all([
+                                userRepo.findOne({ where: { id: savedBooking.studentId } }),
+                                userRepo.findOne({ where: { id: savedBooking.teacherId } }),
+                            ]);
+                            if (student && teacher) {
+                                void NotificationService.notifyBookingConfirmed(savedBooking, student, teacher);
+                            }
+                        } catch (err) {
+                            console.error("Failed to execute fulfillment for auto-confirmed paid booking:", err);
+                        }
+                    }
+                }
+            } else if (payment.paymentType === PaymentType.BOOKING_PACKAGE) {
+                // Confirm all bookings associated with this package ID
+                const bookings = await this.bookingRepo.find({
+                    where: { packageId: payment.referenceId },
+                    relations: ["teacher"]
+                });
+
+                if (bookings.length > 0) {
+                    const teacherProfileRepo = AppDataSource.getRepository(TeacherProfile);
+                    const teacherProfile = await teacherProfileRepo.findOne({
+                        where: { teacherId: bookings[0].teacherId }
+                    });
+                    const shouldAutoConfirm = teacherProfile?.autoConfirmBookings === true;
+
+                    for (const booking of bookings) {
+                        // Only update if it was actually waiting for payment
+                        if (booking.status === BookingStatus.PENDING_PAYMENT) {
+                            booking.status = shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
+                            booking.paymentId = payment.id;
+                            booking.paymentExpiresAt = undefined;
+                            
+                            const savedBooking = await this.bookingRepo.save(booking);
+
+                            if (shouldAutoConfirm) {
+                                try {
+                                    const { BookingController } = require("../controllers/BookingController");
+                                    const teacherName = savedBooking.teacher ? `${savedBooking.teacher.firstName} ${savedBooking.teacher.lastName}` : "Teacher";
+                                    await BookingController.createZoomMeetingForBooking(savedBooking, teacherName);
+                                } catch (err) {
+                                    console.error(`Zoom fulfillment failed for booking ${booking.id} in package ${payment.referenceId}:`, err);
+                                }
+                            }
+                        }
+                    }
+
+                    // Send notifications for each session (or we could group them, but individual is fine for clarity)
+                    try {
+                        const { NotificationService } = require("./NotificationService");
+                        const userRepo = AppDataSource.getRepository(User);
+                        const [student, teacher] = await Promise.all([
+                            userRepo.findOne({ where: { id: bookings[0].studentId } }),
+                            userRepo.findOne({ where: { id: bookings[0].teacherId } }),
+                        ]);
+                        if (student && teacher) {
+                            for (const b of bookings) {
+                                void NotificationService.notifyBookingConfirmed(b, student, teacher);
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Package notification failed:", err);
+                    }
                 }
             }
         } catch (fulfillmentError) {
@@ -262,6 +363,36 @@ class PaymentService {
             } catch (err) {
                 console.error(`Failed to cancel booking ${payment.referenceId} after payment failure:`, err);
             }
+        } else if (payment.paymentType === PaymentType.BOOKING_PACKAGE && payment.referenceId) {
+            // Cancel all bookings in the package
+            try {
+                const bookings = await this.bookingRepo.find({
+                    where: { packageId: payment.referenceId },
+                    relations: ["slot"]
+                });
+
+                for (const booking of bookings) {
+                    if (booking.status === BookingStatus.PENDING_PAYMENT) {
+                        booking.status = BookingStatus.CANCELLED;
+                        booking.cancellationReason = "Package payment failure.";
+                        booking.cancelledAt = new Date();
+                        await this.bookingRepo.save(booking);
+
+                        if (booking.slot) {
+                            const slot = booking.slot;
+                            const { AvailabilitySlot, SlotStatus } = require("../entities/AvailabilitySlot");
+                            const slotRepo = AppDataSource.getRepository(AvailabilitySlot);
+                            slot.currentBookings = Math.max(0, slot.currentBookings - 1);
+                            if (slot.currentBookings < slot.maxBookings) {
+                                slot.status = SlotStatus.AVAILABLE;
+                            }
+                            await slotRepo.save(slot);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error(`Failed to cancel package bookings for package ${payment.referenceId} after payment failure:`, err);
+            }
         }
 
         return payment;
@@ -273,24 +404,32 @@ class PaymentService {
     private async createTransactions(
         paymentId: string,
         userId: string,
-        recipientId: string | undefined, // Not used for ledger entries directly unless we want an earning tx
+        recipientId: string | undefined,
         totalAmountSpent: number,
-        platformFeeAmount: number
+        platformFeeAmount: number,
+        paymentMethod?: PaymentMethod
     ) {
         const transactions: Transaction[] = [];
 
-        // 1. Record the payment from the student
+        // Derive the transaction type from the payment method
+        let txType: TransactionType;
+        if (paymentMethod === PaymentMethod.BANK_TRANSFER) {
+            txType = TransactionType.MANUAL;
+        } else if (paymentMethod === PaymentMethod.PAYHERE) {
+            txType = TransactionType.PAYHERE;
+        } else {
+            txType = TransactionType.PAYMENT;
+        }
+
+        // Record the payment from the student
         const studentTx = this.transactionRepo.create({
             paymentId,
             userId,
-            transactionType: TransactionType.PAYMENT,
-            amount: totalAmountSpent, // Positive per spec
+            transactionType: txType,
+            amount: totalAmountSpent,
             description: `Payment for order ${paymentId}`,
         });
         transactions.push(studentTx);
-
-        // 2. We skip PLATFORM_FEE transaction creation here since our platform is abstract 
-        // without a specific Admin user ID in the DB, but the `Payment` record accurately tracks `platformFee`.
 
         await this.transactionRepo.save(transactions);
     }
@@ -366,7 +505,7 @@ class PaymentService {
             payment.paymentStatus = PaymentStatus.COMPLETED;
             payment.paymentDate = new Date();
             await this.paymentRepo.save(payment);
-            await this.createTransactions(payment.id, userId, undefined, totalAmount, platformFee);
+            await this.createTransactions(payment.id, userId, undefined, totalAmount, platformFee, payment.paymentMethod);
 
             // Fulfil enrollments immediately
             for (const c of courseDetails) {
@@ -413,6 +552,10 @@ class PaymentService {
         payment.gatewayOrderId = payment.id;
         await this.paymentRepo.save(payment);
 
+        const { NotificationService } = require("./NotificationService");
+        const payer = await AppDataSource.getRepository(User).findOne({ where: { id: userId } });
+        if (payer) void NotificationService.notifyPaymentEvent(payment, payer, "payhere_intent");
+
         return {
             checkoutParams,
             checkoutUrl: payhereService.getCheckoutUrl(),
@@ -428,6 +571,16 @@ class PaymentService {
             where: { userId },
             order: { createdAt: "DESC" },
         });
+    }
+
+    async getPaymentStatus(id: string, userId: string) {
+        const payment = await this.paymentRepo.findOne({
+            where: { id, userId }
+        });
+        if (!payment) {
+            throw new Error(`Payment ${id} not found or access denied.`);
+        }
+        return payment;
     }
 
     async getTransactions(userId: string, type?: TransactionType) {
@@ -580,7 +733,15 @@ class PaymentService {
         }
         payment.bankSlipUrl = slipUrl;
         payment.paymentStatus = PaymentStatus.UNDER_REVIEW;
-        return this.paymentRepo.save(payment);
+        await this.paymentRepo.save(payment);
+
+        const { NotificationService } = require("./NotificationService");
+        const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
+        if (payer) {
+            void NotificationService.notifyPaymentEvent(payment, payer, "new_slip");
+        }
+
+        return payment;
     }
 
     /**
@@ -596,14 +757,28 @@ class PaymentService {
             .orderBy("p.created_at", "DESC");
 
         if (params.role !== "admin" && params.instructorId) {
-            // Only pull courses owned by this instructor
-            const instructorCourses = await this.courseRepo.find({
+            // Pull courses owned by this instructor
+            const courseIds = (await this.courseRepo.find({
                 where: { instructorId: params.instructorId },
                 select: ["id"],
-            });
-            const courseIds = instructorCourses.map((c) => c.id);
-            if (courseIds.length === 0) return [];
-            qb.andWhere("p.reference_id IN (:...courseIds)", { courseIds });
+            })).map((c) => c.id);
+
+            // Pull bookings (sessions) owned by this teacher
+            const bookingIds = (await AppDataSource.getRepository(Booking).find({
+                where: { teacherId: params.instructorId },
+                select: ["id"],
+            })).map((b) => b.id);
+
+            qb.andWhere(new Brackets(b => {
+                b.where("p.recipient_id = :userId", { userId: params.instructorId }); // if it was explicitly set
+                
+                if (courseIds.length > 0) {
+                    b.orWhere("(p.paymentType = 'course_enrollment' AND p.reference_id IN (:...courseIds))", { courseIds });
+                }
+                if (bookingIds.length > 0) {
+                    b.orWhere("(p.paymentType = 'booking_session' AND p.reference_id IN (:...bookingIds))", { bookingIds });
+                }
+            }));
         }
 
         return qb.getMany();
@@ -631,6 +806,104 @@ class PaymentService {
             payment.failureReason = note || "Rejected by reviewer.";
             return this.paymentRepo.save(payment);
         }
+    }
+
+    /**
+     * Unified method to list payments with role-based filtering.
+     * Admins see all, Instructors see only their own.
+     */
+    async getFilteredPayments(params: {
+        role: string;
+        requestingUserId: string;
+        page: number;
+        limit: number;
+        status?: string;
+        method?: PaymentMethod;
+    }) {
+        const { role, requestingUserId, page, limit, status, method } = params;
+        const pageNum = Math.max(1, page);
+        const pageSize = Math.min(100, Math.max(1, limit));
+
+        const qb = this.paymentRepo.createQueryBuilder("p")
+            .leftJoinAndSelect("p.user", "student")
+            .leftJoinAndSelect("p.recipient", "recipient")
+            .orderBy("p.createdAt", "DESC");
+
+        if (role === "instructor") {
+            const courseIds = (await this.courseRepo.find({ where: { instructorId: requestingUserId }, select: ["id"] })).map(c => c.id);
+            const bookingIds = (await AppDataSource.getRepository(Booking).find({ where: { teacherId: requestingUserId }, select: ["id"] })).map(b => b.id);
+
+            qb.andWhere(new Brackets(b => {
+                b.where("p.recipientId = :userId", { userId: requestingUserId });
+                if (courseIds.length > 0) {
+                    b.orWhere("(p.paymentType = 'course_enrollment' AND p.referenceId IN (:...courseIds))", { courseIds });
+                }
+                if (bookingIds.length > 0) {
+                    b.orWhere("(p.paymentType = 'booking_session' AND p.referenceId IN (:...bookingIds))", { bookingIds });
+                }
+            }));
+        }
+
+        if (status) {
+            qb.andWhere("p.paymentStatus = :status", { status });
+        }
+
+        if (method) {
+            qb.andWhere("p.paymentMethod = :method", { method });
+        }
+
+        const [payments, total] = await qb
+            .skip((pageNum - 1) * pageSize)
+            .take(pageSize)
+            .getManyAndCount();
+
+        // Map course logic (similar to AdminController)
+        const courseIds = payments
+            .filter(p => p.paymentType === PaymentType.COURSE_ENROLLMENT)
+            .map(p => p.referenceId)
+            .filter(Boolean);
+
+        const courses = courseIds.length > 0
+            ? await this.courseRepo.find({ where: { id: In(courseIds) }, select: ["id", "title"] })
+            : [];
+        const courseMap = new Map(courses.map(c => [c.id, c]));
+
+        const results = payments.map(p => ({
+            id: p.id,
+            studentId: p.userId,
+            courseId: p.paymentType === PaymentType.COURSE_ENROLLMENT ? p.referenceId : null,
+            amount: p.amount,
+            currency: p.currency,
+            paymentMethod: p.paymentMethod,
+            paymentType: p.paymentType,
+            paymentStatus: p.paymentStatus,
+            status: p.paymentStatus.toUpperCase(), // Legacy field for frontend compatibility
+            refundAmount: p.refundAmount ?? null,
+            refundDate: p.refundDate ?? null,
+            transactionId: p.transactionId ?? null,
+            bankSlipUrl: p.bankSlipUrl ?? null,
+            createdAt: p.createdAt,
+            student: {
+                firstName: p.user?.firstName ?? '',
+                lastName: p.user?.lastName ?? '',
+                email: p.user?.email ?? '',
+            },
+            instructor: p.recipient ? {
+                firstName: p.recipient.firstName,
+                lastName: p.recipient.lastName,
+                email: p.recipient.email,
+            } : null,
+            course: p.paymentType === PaymentType.COURSE_ENROLLMENT
+                ? (courseMap.get(p.referenceId) ?? null)
+                : null,
+        }));
+
+        return {
+            payments: results,
+            total,
+            page: pageNum,
+            totalPages: Math.ceil(total / pageSize),
+        };
     }
 }
 

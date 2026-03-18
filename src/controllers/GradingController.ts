@@ -375,6 +375,19 @@ export class GradingController {
      * Trigger OCR processing on a submission's uploaded image
      * POST /api/grading/submissions/:submissionId/ocr
      */
+    /**
+     * Map LMS language value to Tesseract.js language code
+     * Issue 2 Fix: ensures multilingual exams use the correct OCR model.
+     */
+    private static getTesseractLangCode(examLanguage?: string): string {
+        const langMap: Record<string, string> = {
+            english: "eng",
+            sinhala: "sin",
+            tamil: "tam",
+        };
+        return langMap[(examLanguage ?? "").toLowerCase()] ?? "eng";
+    }
+
     static processOCR = async (req: Request, res: Response): Promise<Response> => {
         try {
             const submissionId = req.params.submissionId as string;
@@ -397,15 +410,20 @@ export class GradingController {
                 return res.status(400).json({ error: "No upload found for this submission." });
             }
 
-            const ocrText = await OCRService.processSubmissionImage(
-                submissionId,
-                submission.uploadUrl
-            );
+            // Issue 2 Fix: use exam language to select correct Tesseract language model
+            const tesseractLang = GradingController.getTesseractLangCode(submission.exam.language);
+            Logger.info(`OCR: using language model '${tesseractLang}' for exam language '${submission.exam.language ?? "english"}'`);
+
+            const ocrText = await OCRService.extractText(submission.uploadUrl, tesseractLang);
+
+            // Persist the OCR result to the submission record
+            await submissionRepo.update(submissionId, { ocrText });
 
             return res.json({
                 message: "OCR processing complete.",
                 submissionId,
-                ocrText
+                ocrText,
+                languageUsed: tesseractLang
             });
         } catch (error) {
             Logger.error("Error processing OCR:", error);
@@ -425,7 +443,7 @@ export class GradingController {
             const submissionRepo = AppDataSource.getRepository(AnswerSubmission);
             const masterSubmission = await submissionRepo.findOne({
                 where: { id: submissionId, questionId: IsNull() },
-                relations: ["exam", "exam.questions", "student"]
+                relations: ["exam", "exam.questions", "exam.questions.options", "student"]
             });
 
             if (!masterSubmission) {
@@ -453,11 +471,21 @@ export class GradingController {
                 .sort((a, b) => a.orderIndex - b.orderIndex)
                 .map(q => {
                     const answer = answers.find(a => a.questionId === q.id);
+                    
+                    // Resolve MCQ/True-False IDs to text
+                    let finalAnswerText = answer?.answerText;
+                    if (finalAnswerText && (q.questionType === "multiple_choice" || q.questionType === "true_false")) {
+                        const selectedOpt = q.options?.find(o => o.id === finalAnswerText);
+                        if (selectedOpt) {
+                            finalAnswerText = selectedOpt.optionText;
+                        }
+                    }
+
                     return {
                         questionText: q.questionText,
                         questionType: q.questionType,
                         marks: Number(q.marks),
-                        answerText: answer?.answerText,
+                        answerText: finalAnswerText,
                         uploadUrl: answer?.uploadUrl,
                         marksAwarded: answer?.marksAwarded ? Number(answer.marksAwarded) : undefined,
                         feedback: answer?.feedback
@@ -474,7 +502,7 @@ export class GradingController {
                 attemptNumber: masterSubmission.attemptNumber,
                 totalMarks: Number(masterSubmission.exam.totalMarks),
                 marksAwarded: Number(masterSubmission.marksAwarded) || 0,
-                submittedAt: masterSubmission.submittedAt?.toISOString() || "N/A",
+                submittedAt: masterSubmission.submittedAt?.toLocaleString() || "N/A",
                 questions,
                 overallFeedback: masterSubmission.feedback || undefined
             });

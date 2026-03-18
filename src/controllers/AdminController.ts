@@ -9,6 +9,7 @@ import { Payout, PayoutStatus } from "../entities/Payout";
 import { Payment, PaymentType } from "../entities/Payment";
 import { Enrollment } from "../entities/Enrollment";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
+import paymentService from "../services/PaymentService";
 
 const userRepository = AppDataSource.getRepository(User);
 const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
@@ -54,7 +55,7 @@ export class AdminController {
         students,
         instructors,
         parents,
-        admins,
+        admins: 0, // Hidden as per request
         totalCourses,
         totalBookings,
         pendingTeachers,
@@ -77,6 +78,9 @@ export class AdminController {
       const { role, search, page = "1", limit = "20" } = req.query;
 
       const qb = userRepository.createQueryBuilder("u");
+      
+      // Story: Exclude all admins from the listing as requested
+      qb.where("u.role != :adminRole", { adminRole: "admin" });
 
       if (role && typeof role === "string") {
         qb.andWhere("u.role = :role", { role });
@@ -285,8 +289,7 @@ export class AdminController {
    */
   static async getPayouts(_req: Request, res: Response) {
     try {
-      const payoutRepository = AppDataSource.getRepository(Payout);
-      const payouts = await payoutRepository.find({
+      const payouts = await AppDataSource.getRepository(Payout).find({
         relations: ["teacher"],
         order: { createdAt: "DESC" },
       });
@@ -352,76 +355,20 @@ export class AdminController {
    */
   static async getPayments(req: Request, res: Response) {
     try {
-      const { page = "1", limit = "20", status } = req.query;
-      const pageNum = parseInt(page as string, 10);
-      const pageSize = parseInt(limit as string, 10);
+      const { page = "1", limit = "20", status, method } = req.query;
+      const role = req.session.userRole!;
+      const userId = req.session.userId!;
 
-      const qb = paymentRepository.createQueryBuilder("p")
-        .leftJoinAndSelect("p.user", "student")
-        .leftJoinAndSelect("p.recipient", "recipient");
-
-      if (status) {
-        qb.andWhere("p.paymentStatus = :status", { status });
-      }
-
-      const { method } = req.query;
-      if (method) {
-        qb.andWhere("p.paymentMethod = :method", { method });
-      }
-
-      const [payments, total] = await qb
-        .orderBy("p.createdAt", "DESC")
-        .skip((pageNum - 1) * pageSize)
-        .take(pageSize)
-        .getManyAndCount();
-
-      // Load course titles for course_enrollment payments
-      const courseIds = payments
-        .filter(p => p.paymentType === PaymentType.COURSE_ENROLLMENT)
-        .map(p => p.referenceId)
-        .filter(Boolean);
-
-      const courses = courseIds.length > 0
-        ? await courseRepository.find({ where: { id: In(courseIds) }, select: ["id", "title"] })
-        : [];
-      const courseMap = new Map(courses.map(c => [c.id, c]));
-
-      const result = payments.map(p => ({
-        id: p.id,
-        studentId: p.userId,
-        courseId: p.paymentType === PaymentType.COURSE_ENROLLMENT ? p.referenceId : null,
-        amount: p.amount,
-        currency: p.currency,
-        paymentMethod: p.paymentMethod,
-        paymentType: p.paymentType,
-        status: p.paymentStatus.toUpperCase(),
-        paymentStatus: p.paymentStatus,
-        refundAmount: p.refundAmount ?? null,
-        refundDate: p.refundDate ?? null,
-        transactionId: p.transactionId ?? null,
-        bankSlipUrl: p.bankSlipUrl ?? null,
-        createdAt: p.createdAt,
-        student: {
-          firstName: p.user?.firstName ?? '',
-          lastName: p.user?.lastName ?? '',
-          email: p.user?.email ?? '',
-        },
-        instructor: p.recipient ? {
-          firstName: p.recipient.firstName,
-          lastName: p.recipient.lastName,
-          email: p.recipient.email,
-        } : null,
-        course: p.paymentType === PaymentType.COURSE_ENROLLMENT
-          ? (courseMap.get(p.referenceId) ?? null)
-          : null,
-      }));
-
-      res.json({
-        payments: result,
-        total,
-        page: pageNum,
-        totalPages: Math.ceil(total / pageSize),
+      const result = await paymentService.getFilteredPayments({
+        role,
+        requestingUserId: userId,
+        page: parseInt(page as string, 10),
+        limit: parseInt(limit as string, 10),
+        status: status as string,
+        method: method as any,
       });
+
+      res.json(result);
     } catch (error) {
       console.error("Get payments error:", error);
       res.status(500).json({ error: "Failed to fetch payments" });

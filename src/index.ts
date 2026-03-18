@@ -14,6 +14,7 @@ import enrollmentRoutes from "./routes/enrollmentRoutes";
 import parentRoutes from "./routes/parentRoutes";
 import availabilityRoutes from "./routes/availabilityRoutes";
 import bookingRoutes from "./routes/bookingRoutes";
+import assistantRoutes from "./routes/assistantRoutes";
 import profileRoutes from "./routes/profileRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import contentRoutes from "./routes/contentRoutes";
@@ -68,8 +69,6 @@ app.use(
   })
 );
 
-// MUST be before express.json() because webhook needs raw buffer
-app.use("/api/payments", paymentRoutes);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -104,6 +103,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 // API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/lessons", lessonRoutes);
@@ -111,6 +111,7 @@ app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/parent", parentRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/assistants", assistantRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/content", contentRoutes);

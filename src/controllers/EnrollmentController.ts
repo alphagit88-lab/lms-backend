@@ -25,7 +25,7 @@ export class EnrollmentController {
 
       const enrollments = await enrollmentRepository.find({
         where: { studentId: userId },
-        relations: ["course", "course.instructor", "course.category"],
+        relations: ["course", "course.instructor", "course.category", "course.lessons"],
         order: { enrolledAt: "DESC" },
       });
 
