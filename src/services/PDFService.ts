@@ -1,5 +1,7 @@
 import PDFDocument from "pdfkit";
 import { Logger } from "../utils/logger";
+import path from "path";
+import fs from "fs";
 
 /**
  * PDF Service — Converts exam submissions to downloadable PDF documents
@@ -36,11 +38,26 @@ export class PDFService {
                 doc.on("end", () => resolve(Buffer.concat(chunks)));
                 doc.on("error", reject);
 
+                // Setup Unicode font if available
+                const fontPath = path.join(__dirname, "../assets/fonts/FreeSerif.ttf");
+                const hasUnicodeFont = fs.existsSync(fontPath);
+                
+                const setMainFont = (bold = false) => {
+                    if (hasUnicodeFont) {
+                        doc.font(fontPath);
+                    } else {
+                        doc.font(bold ? "Helvetica-Bold" : "Helvetica");
+                    }
+                };
+
                 // Header
-                doc.fontSize(20).font("Helvetica-Bold").fillColor("#111111")
+                setMainFont(true);
+                doc.fontSize(20).fillColor("#111111")
                     .text(data.examTitle, { align: "center" });
                 doc.moveDown(0.5);
-                doc.fontSize(12).font("Helvetica").fillColor("#333333")
+                
+                setMainFont(false);
+                doc.fontSize(12).fillColor("#333333")
                     .text(`Student: ${data.studentName}`, { align: "center" });
                 doc.text(`Attempt: ${data.attemptNumber} | Submitted: ${data.submittedAt}`, { align: "center" });
                 doc.moveDown(0.3);
@@ -49,7 +66,8 @@ export class PDFService {
                 const scorePercent = data.totalMarks > 0
                     ? ((data.marksAwarded / data.totalMarks) * 100).toFixed(1)
                     : "0";
-                doc.fontSize(16).font("Helvetica-Bold").fillColor("#000000")
+                setMainFont(true);
+                doc.fontSize(16).fillColor("#000000")
                     .text(`Score: ${data.marksAwarded} / ${data.totalMarks} (${scorePercent}%)`, { align: "center" });
 
                 doc.moveDown(1);
@@ -62,32 +80,37 @@ export class PDFService {
                         doc.addPage();
                     }
 
-                    doc.fontSize(11).font("Helvetica-Bold").fillColor("#000000")
+                    setMainFont(true);
+                    doc.fontSize(11).fillColor("#000000")
                         .text(`Q${idx + 1}. ${q.questionText}`);
-                    doc.fontSize(9).font("Helvetica").fillColor("#888888")
+                    
+                    setMainFont(false);
+                    doc.fontSize(9).fillColor("#888888")
                         .text(`[${q.questionType.toUpperCase().replace("_", " ")} — ${q.marks} marks]`);
 
                     doc.moveDown(0.3);
 
                     // Student answer
-                    doc.fontSize(10).font("Helvetica").fillColor("#333333")
-                        .text("Answer: ", { continued: true });
+                    doc.fontSize(10).fillColor("#333333")
+                        .text("Your Answer: ", { continued: true });
                     doc.fillColor("#000000")
                         .text(q.answerText || (q.uploadUrl ? "[Handwritten Upload]" : "[No answer provided]"));
 
                     if (q.uploadUrl) {
-                        doc.fontSize(9).font("Helvetica").fillColor("#0066cc")
+                        doc.fontSize(9).fillColor("#0066cc")
                             .text(`Attachment: ${q.uploadUrl}`);
                     }
 
                     // Marks and feedback
                     if (q.marksAwarded !== undefined && q.marksAwarded !== null) {
                         doc.moveDown(0.2);
-                        doc.fontSize(10).font("Helvetica-Bold").fillColor("#006600")
+                        setMainFont(true);
+                        doc.fontSize(10).fillColor("#006600")
                             .text(`Marks: ${q.marksAwarded} / ${q.marks}`);
                     }
                     if (q.feedback) {
-                        doc.fontSize(9).font("Helvetica-Oblique").fillColor("#666666")
+                        setMainFont(false);
+                        doc.fontSize(9).fillColor("#666666")
                             .text(`Feedback: ${q.feedback}`);
                     }
 
@@ -100,15 +123,18 @@ export class PDFService {
                     doc.moveDown(0.5);
                     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke("#cccccc");
                     doc.moveDown(0.5);
-                    doc.fontSize(11).font("Helvetica-Bold").fillColor("#000000")
+                    setMainFont(true);
+                    doc.fontSize(11).fillColor("#000000")
                         .text("Instructor Feedback:");
-                    doc.fontSize(10).font("Helvetica").fillColor("#333333")
+                    setMainFont(false);
+                    doc.fontSize(10).fillColor("#333333")
                         .text(data.overallFeedback);
                 }
 
                 // Footer
                 doc.moveDown(2);
-                doc.fontSize(8).font("Helvetica").fillColor("#999999")
+                setMainFont(false);
+                doc.fontSize(8).fillColor("#999999")
                     .text(`Generated on ${new Date().toISOString().split("T")[0]} — LMS Platform`, {
                         align: "center"
                     });

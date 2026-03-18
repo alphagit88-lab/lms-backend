@@ -291,4 +291,61 @@ export class ProfileController {
       return res.status(500).json({ error: "Failed to verify teacher" });
     }
   };
+
+  /**
+   * Get similar teachers (same subject, excluding the given teacher)
+   * GET /api/profiles/teacher/:teacherId/similar?limit=5
+   */
+  static getSimilarTeachers = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const teacherId = req.params.teacherId as string;
+      const limit = Math.min(parseInt((req.query.limit as string) ?? "5", 10), 20);
+
+      const profileRepository = AppDataSource.getRepository(TeacherProfile);
+
+      // Load source teacher to get their subjects
+      const sourceProfile = await profileRepository.findOne({ where: { teacherId } });
+      if (!sourceProfile || !sourceProfile.subjects) {
+        return res.json({ teachers: [] });
+      }
+
+      // Parse subjects — handle comma-separated string or JSON array
+      let subjectList: string[] = [];
+      try {
+        const parsed = JSON.parse(sourceProfile.subjects);
+        subjectList = Array.isArray(parsed) ? parsed : [sourceProfile.subjects];
+      } catch {
+        subjectList = sourceProfile.subjects.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+
+      if (subjectList.length === 0) {
+        return res.json({ teachers: [] });
+      }
+
+      // Build query: find other verified teachers whose subjects overlap
+      let query = profileRepository
+        .createQueryBuilder("profile")
+        .leftJoinAndSelect("profile.teacher", "teacher")
+        .where("profile.teacherId != :teacherId", { teacherId })
+        .andWhere("profile.subjects IS NOT NULL");
+
+      // OR condition for any matching subject keyword
+      const subjectConditions = subjectList.map((_, idx) => `profile.subjects LIKE :subject${idx}`);
+      const subjectParams: Record<string, string> = {};
+      subjectList.forEach((s, idx) => { subjectParams[`subject${idx}`] = `%${s}%`; });
+
+      query = query.andWhere(`(${subjectConditions.join(" OR ")})`, subjectParams);
+
+      const teachers = await query
+        .orderBy("profile.rating", "DESC")
+        .addOrderBy("profile.totalStudents", "DESC")
+        .limit(limit)
+        .getMany();
+
+      return res.json({ teachers });
+    } catch (error: any) {
+      console.error("Error fetching similar teachers:", error);
+      return res.status(500).json({ error: "Failed to fetch similar teachers" });
+    }
+  };
 }

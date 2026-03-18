@@ -5,7 +5,7 @@ import { BookingPackage, PackageStatus } from "../entities/BookingPackage";
 import { AvailabilitySlot, SlotStatus } from "../entities/AvailabilitySlot";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { TeacherProfile } from "../entities/TeacherProfile";
-import { Payment, PaymentStatus } from "../entities/Payment";
+import { Payment, PaymentStatus, PaymentType } from "../entities/Payment";
 import { User } from "../entities/User";
 import { Session, SessionType, SessionStatus } from "../entities/Session";
 import { QueryRunner } from "typeorm";
@@ -13,6 +13,8 @@ import ZoomService from "../services/ZoomService";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
 import { Logger } from "../utils/logger";
 import { NotificationService } from "../services/NotificationService";
+import { isZoomFreePlan, ZOOM_MAX_FREE_DURATION_MINUTES } from "../config/zoomConfig";
+import { TeacherAssistant } from "../entities/TeacherAssistant";
 
 /**
  * Cancellation refund policy:
@@ -38,9 +40,29 @@ function calculateRefundPercentage(
 
 export class BookingController {
   /**
+   * Helper to check if a user is authorized to manage a teacher's bookings.
+   */
+  private static checkAuthorization = async (
+    userId: string,
+    teacherId: string,
+    permission: "slots" | "bookings" = "bookings"
+  ): Promise<boolean> => {
+    if (userId === teacherId) return true;
+
+    const assistantRepo = AppDataSource.getRepository(TeacherAssistant);
+    const assistant = await assistantRepo.findOne({
+      where: { teacherId, assistantId: userId },
+    });
+
+    if (!assistant) return false;
+
+    return permission === "slots" ? assistant.canManageSlots : assistant.canManageBookings;
+  };
+
+  /**
    * Helper to create a Zoom meeting and Session record for a confirmed booking
    */
-  private static createZoomMeetingForBooking = async (
+  public static createZoomMeetingForBooking = async (
     booking: Booking,
     teacherName: string,
     queryRunner?: QueryRunner
@@ -49,6 +71,14 @@ export class BookingController {
       const duration = Math.round(
         (booking.sessionEndTime.getTime() - booking.sessionStartTime.getTime()) / (1000 * 60)
       );
+
+      if (isZoomFreePlan() && duration > ZOOM_MAX_FREE_DURATION_MINUTES) {
+        Logger.warn(
+          `Zoom free-plan duration exceeded for booking ${booking.id}. ` +
+          `Scheduled duration ${duration} minutes is greater than ${ZOOM_MAX_FREE_DURATION_MINUTES} minutes. ` +
+          `Zoom will still create the meeting but may enforce its own time limits.`
+        );
+      }
 
       const zoomResponse = await ZoomService.createMeeting({
         topic: `${teacherName} - ${booking.notes || 'Tutoring Session'}`,
@@ -223,12 +253,12 @@ export class BookingController {
       const shouldAutoConfirm = teacherProfile?.autoConfirmBookings === true;
 
       // Create the booking
-      // Story 2.7: Set PENDING_PAYMENT with a 10-minute expiry for paid slots
+      // Story 2.7: Set PENDING_PAYMENT with a 30-minute expiry for paid slots
       const isPaid = slot.price && Number(slot.price) > 0;
       const finalStatus = shouldAutoConfirm ? BookingStatus.CONFIRMED : BookingStatus.PENDING;
       const initialStatus = isPaid ? BookingStatus.PENDING_PAYMENT : finalStatus;
 
-      const paymentExpiresAt = isPaid ? new Date(Date.now() + 10 * 60 * 1000) : undefined;
+      const paymentExpiresAt = isPaid ? new Date(Date.now() + 30 * 60 * 1000) : undefined;
 
       const booking = queryRunner.manager.create(Booking, {
         slotId,
@@ -361,17 +391,24 @@ export class BookingController {
     }
   };
 
-  // Get teacher's bookings
+  // Get teacher's bookings (Teacher or Assistant)
   static getTeacherBookings = async (req: Request, res: Response): Promise<Response> => {
     try {
-      const teacherId = req.session.userId!;
-      const { status, date } = req.query;
+      const currentUserId = req.session.userId!;
+      const { teacherId, status, date } = req.query;
+
+      const targetTeacherId = (teacherId as string) || currentUserId;
+
+      // Authorization Check
+      if (!(await BookingController.checkAuthorization(currentUserId, targetTeacherId, "bookings"))) {
+        return res.status(403).json({ error: "You are not authorized to view bookings for this teacher" });
+      }
 
       const bookingRepository = AppDataSource.getRepository(Booking);
       let query = bookingRepository.createQueryBuilder("booking")
         .leftJoinAndSelect("booking.slot", "slot")
         .leftJoinAndSelect("booking.student", "student")
-        .where("booking.teacherId = :teacherId", { teacherId });
+        .where("booking.teacherId = :targetTeacherId", { targetTeacherId: targetTeacherId });
 
       if (status) {
         query = query.andWhere("booking.status = :status", { status });
@@ -398,16 +435,16 @@ export class BookingController {
     }
   };
 
-  // Confirm booking (Teacher only)
+  // Confirm booking (Teacher or Assistant)
   static confirmBooking = async (req: Request, res: Response): Promise<Response> => {
     try {
       const id = req.params.id as string;
-      const teacherId = req.session.userId!;
+      const currentUserId = req.session.userId!;
       const { meetingLink } = req.body;
 
       const bookingRepository = AppDataSource.getRepository(Booking);
       const booking = await bookingRepository.findOne({
-        where: { id, teacherId },
+        where: { id },
         relations: ["teacher"]
       });
 
@@ -415,11 +452,88 @@ export class BookingController {
         return res.status(404).json({ error: "Booking not found" });
       }
 
-      if (booking.status !== BookingStatus.PENDING) {
+      // Authorization Check
+      if (!(await BookingController.checkAuthorization(currentUserId, booking.teacherId, "bookings"))) {
+        return res.status(403).json({ error: "You are not authorized to confirm bookings for this teacher" });
+      }
+
+      if (booking.status !== BookingStatus.PENDING && booking.status !== BookingStatus.PENDING_PAYMENT) {
         return res.status(400).json({ error: "Only pending bookings can be confirmed" });
       }
 
+      // ── Payment Gate (Fix 1 — R6 alignment) ──────────────────────────────
+      // If the booking is for a paid slot and is still awaiting payment,
+      // the teacher cannot confirm it manually until payment completes.
+      //
+      // Logic:
+      //  • Free slots (amount null or 0)  → no payment required, skip check
+      //  • PENDING status (not PENDING_PAYMENT) → payment already fulfilled
+      //    by PayHere webhook which promotes the booking to PENDING; skip check
+      //  • PENDING_PAYMENT + paid amount → payment has NOT yet been received;
+      //    verify a completed Payment record exists before allowing confirmation
+      const isPaidBooking = booking.amount && Number(booking.amount) > 0;
+      const isAwaitingPayment = booking.status === BookingStatus.PENDING_PAYMENT;
+
+      if (isPaidBooking && isAwaitingPayment) {
+        const paymentRepository = AppDataSource.getRepository(Payment);
+
+        // Two ways a completed payment can be linked:
+        // 1. booking.paymentId is set (preferred — set by PayHere webhook handler)
+        // 2. Payment.referenceId = booking.id + status = completed (fallback)
+        let paymentConfirmed = false;
+
+        if (booking.paymentId) {
+          const linkedPayment = await paymentRepository.findOne({
+            where: { id: booking.paymentId, paymentStatus: PaymentStatus.COMPLETED },
+          });
+          paymentConfirmed = !!linkedPayment;
+        }
+
+        if (!paymentConfirmed) {
+          const paymentByRef = await paymentRepository.findOne({
+            where: {
+              referenceId: booking.id,
+              paymentStatus: PaymentStatus.COMPLETED,
+            },
+          });
+          paymentConfirmed = !!paymentByRef;
+
+          // If found via referenceId, back-fill booking.paymentId for future lookups
+          if (paymentByRef) {
+            booking.paymentId = paymentByRef.id;
+          }
+        }
+
+        if (!paymentConfirmed) {
+          // Calculate time remaining on the payment window
+          const expiresAt = booking.paymentExpiresAt;
+          const timeLeftMs = expiresAt ? expiresAt.getTime() - Date.now() : null;
+          const timeLeftMins = timeLeftMs && timeLeftMs > 0
+            ? Math.ceil(timeLeftMs / 60000)
+            : null;
+
+          return res.status(402).json({
+            error: "Cannot confirm booking: payment has not been completed by the student.",
+            detail: timeLeftMins
+              ? `The student has ${timeLeftMins} minute(s) remaining to complete payment.`
+              : expiresAt && Date.now() > expiresAt.getTime()
+                ? "The payment window has expired. The student must rebook."
+                : "Payment is still pending.",
+            bookingId: booking.id,
+            amount: booking.amount,
+            paymentStatus: "pending",
+          });
+        }
+
+        // Payment verified — clear the expiry flag
+        booking.paymentExpiresAt = undefined;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       booking.status = BookingStatus.CONFIRMED;
+      // Clear payment expiry (covers the case of admin overriding a pending-payment booking)
+      if (booking.paymentExpiresAt) booking.paymentExpiresAt = undefined;
+
       if (meetingLink) {
         booking.meetingLink = meetingLink;
         await bookingRepository.save(booking);
@@ -445,6 +559,7 @@ export class BookingController {
       return res.status(500).json({ error: "Failed to confirm booking" });
     }
   };
+
 
   // Cancel booking with refund policy
   static cancelBooking = async (req: Request, res: Response): Promise<Response> => {
@@ -473,7 +588,18 @@ export class BookingController {
       }
 
       const now = new Date();
-      const cancelledByTeacher = userId === booking.teacherId;
+      
+      // Determine if cancelled by teacher or assistant
+      const isAssistant = userId !== booking.teacherId && userId !== booking.studentId && userId !== booking.bookedById;
+      const cancelledByTeacher = userId === booking.teacherId || isAssistant;
+
+      if (isAssistant) {
+        // Double check authorization (though general permission was checked above, 
+        // we confirm they are an assistant for THIS specific teacher)
+        if (!(await BookingController.checkAuthorization(userId, booking.teacherId, "bookings"))) {
+          return res.status(403).json({ error: "You do not have permission to cancel this booking" });
+        }
+      }
 
       // Calculate refund policy
       const refundPercentage = calculateRefundPercentage(
@@ -613,17 +739,22 @@ export class BookingController {
     }
   };
 
-  // Mark booking as completed (Teacher only)
+  // Mark booking as completed (Teacher or Assistant)
   static completeBooking = async (req: Request, res: Response): Promise<Response> => {
     try {
       const id = req.params.id as string;
-      const teacherId = req.session.userId!;
+      const currentUserId = req.session.userId!;
 
       const bookingRepository = AppDataSource.getRepository(Booking);
-      const booking = await bookingRepository.findOne({ where: { id, teacherId } });
+      const booking = await bookingRepository.findOne({ where: { id } });
 
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
+      }
+
+      // Authorization Check
+      if (!(await BookingController.checkAuthorization(currentUserId, booking.teacherId, "bookings"))) {
+        return res.status(403).json({ error: "You are not authorized to complete bookings for this teacher" });
       }
 
       booking.status = BookingStatus.COMPLETED;
@@ -636,17 +767,22 @@ export class BookingController {
     }
   };
 
-  // Mark booking as no-show (Teacher only)
+  // Mark booking as no-show (Teacher or Assistant)
   static markNoShow = async (req: Request, res: Response): Promise<Response> => {
     try {
       const id = req.params.id as string;
-      const teacherId = req.session.userId!;
+      const currentUserId = req.session.userId!;
 
       const bookingRepository = AppDataSource.getRepository(Booking);
-      const booking = await bookingRepository.findOne({ where: { id, teacherId } });
+      const booking = await bookingRepository.findOne({ where: { id } });
 
       if (!booking) {
         return res.status(404).json({ error: "Booking not found" });
+      }
+
+      // Authorization Check
+      if (!(await BookingController.checkAuthorization(currentUserId, booking.teacherId, "bookings"))) {
+        return res.status(403).json({ error: "You are not authorized to manage bookings for this teacher" });
       }
 
       booking.status = BookingStatus.NO_SHOW;
@@ -909,6 +1045,196 @@ export class BookingController {
     } catch (error: any) {
       console.error("Error fetching package:", error);
       return res.status(500).json({ error: "Failed to fetch package" });
+    }
+  };
+
+  /**
+   * Sync payment status for a booking (manually refresh status)
+   * POST /api/bookings/:id/sync-payment
+   */
+  static syncBookingPayment = async (req: Request, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      const userId = req.session.userId!;
+      
+      const bookingRepo = AppDataSource.getRepository(Booking);
+      const booking = await bookingRepo.findOne({
+        where: { id, studentId: userId }
+      });
+
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      if (booking.status !== BookingStatus.PENDING_PAYMENT) {
+        return res.json({ success: true, message: "Booking is not awaiting payment", status: booking.status });
+      }
+
+      // Check for any COMPLETED payment record for this booking reference
+      const paymentRepo = AppDataSource.getRepository(Payment);
+      
+      // Look for individual session payments OR package payments that might include this booking
+      const completedPayment = await paymentRepo.findOne({
+        where: [
+            { referenceId: id, paymentStatus: PaymentStatus.COMPLETED, paymentType: PaymentType.BOOKING_SESSION },
+            { referenceId: String(booking.packageId), paymentStatus: PaymentStatus.COMPLETED, paymentType: PaymentType.BOOKING_PACKAGE }
+        ].filter(v => v.referenceId !== "null" && v.referenceId !== "undefined")
+      });
+
+      if (completedPayment) {
+        // Run fulfillment logic (idempotent)
+        const paymentServiceModule = require("../services/PaymentService");
+        const paymentServiceInstance = paymentServiceModule.default || new paymentServiceModule.PaymentService();
+        await paymentServiceInstance.confirmPaymentSuccess(completedPayment.id);
+        
+        const refreshedBooking = await bookingRepo.findOne({ 
+            where: { id },
+            relations: ["slot", "teacher"]
+        });
+        
+        return res.json({ 
+            success: true, 
+            message: "Payment discovered and applied.", 
+            status: refreshedBooking?.status,
+            booking: refreshedBooking
+        });
+      }
+
+      // If no completed payment found, maybe there's a PENDING one we can try to verify?
+      // On localhost, we can provide a special message if a PENDING one exists.
+      const pendingPayment = await paymentRepo.findOne({
+        where: { referenceId: id, paymentStatus: PaymentStatus.PENDING, paymentType: PaymentType.BOOKING_SESSION },
+        order: { createdAt: "DESC" }
+      });
+
+      if (pendingPayment) {
+          const isLocal = String(req.headers.host).includes("localhost") || process.env.NODE_ENV === "development";
+          if (isLocal) {
+              return res.json({
+                  success: false,
+                  hasPending: true,
+                  message: "A pending payment record exists. Please complete the checkout process or use the 'Force Sync' feature on the success page if you are in development mode.",
+                  paymentId: pendingPayment.id
+              });
+          }
+      }
+
+      return res.json({ 
+        success: false, 
+        message: "No completed payment found for this booking. If you just finished paying, please wait a few seconds and try again.",
+        status: booking.status
+      });
+
+    } catch (error: any) {
+      console.error("Sync booking payment error:", error);
+      return res.status(500).json({ error: "Failed to sync payment status." });
+    }
+  };
+
+  /**
+   * Remove a specific session from a package before payment
+   * POST /api/bookings/packages/:id/remove-session/:bookingId
+   */
+  static removeSessionFromPackage = async (req: Request, res: Response) => {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const packageId = String(req.params.id);
+      const { bookingId } = req.params;
+      const userId = req.session.userId!;
+
+      const packageRepo = queryRunner.manager.getRepository(BookingPackage);
+      const pkg = await packageRepo.findOne({
+        where: { id: packageId },
+        relations: ["bookings", "bookings.slot"]
+      });
+
+      if (!pkg) {
+        return res.status(404).json({ error: "Package not found" });
+      }
+
+      // Check access
+      if (pkg.studentId !== userId && pkg.bookedById !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      if (pkg.status !== PackageStatus.ACTIVE) {
+        return res.status(400).json({ error: "Cannot modify a package that is not active" });
+      }
+
+      // Find the booking to remove
+      const bookingToRemove = pkg.bookings.find(b => b.id === bookingId);
+      if (!bookingToRemove) {
+        return res.status(404).json({ error: "Booking not found in this package" });
+      }
+
+      if (bookingToRemove.status !== BookingStatus.PENDING_PAYMENT) {
+        return res.status(400).json({ error: "Can only remove sessions that are awaiting payment" });
+      }
+
+      if (pkg.bookings.filter(b => b.status !== BookingStatus.CANCELLED).length <= 1) {
+        return res.status(400).json({ error: "A package must have at least 1 session. To remove the last session, please cancel the entire booking process." });
+      }
+
+      // 1. "Cancel" the booking
+      bookingToRemove.status = BookingStatus.CANCELLED;
+      bookingToRemove.cancellationReason = "Removed from package during checkout";
+      bookingToRemove.cancelledById = userId;
+      bookingToRemove.cancelledAt = new Date();
+      await queryRunner.manager.save(Booking, bookingToRemove);
+
+      // 2. Free up the slot
+      const slot = bookingToRemove.slot;
+      if (slot) {
+          slot.currentBookings = Math.max(0, slot.currentBookings - 1);
+          if (slot.status === SlotStatus.BOOKED && slot.currentBookings < slot.maxBookings) {
+              slot.status = SlotStatus.AVAILABLE;
+          }
+          await queryRunner.manager.save(AvailabilitySlot, slot);
+      }
+
+      // 3. Recalculate Package
+      const remainingBookings = pkg.bookings.filter(b => b.id !== bookingId && b.status !== BookingStatus.CANCELLED);
+      
+      const originalTotalPrice = remainingBookings.reduce((sum, b) => {
+          return sum + (b.slot?.price ? Number(b.slot.price) : 0);
+      }, 0);
+
+      const newCount = remainingBookings.length;
+      const newDiscountPercentage = newCount >= 5 ? 10 : newCount >= 3 ? 5 : 0;
+      const newFinalPrice = Math.round(originalTotalPrice * (1 - newDiscountPercentage / 100) * 100) / 100;
+
+      pkg.totalSessions = newCount;
+      pkg.totalPrice = originalTotalPrice;
+      pkg.discountPercentage = newDiscountPercentage;
+      pkg.finalPrice = newFinalPrice;
+
+      // Update individual booking amounts if discount changed
+      const newPricePerSession = Math.round((newFinalPrice / newCount) * 100) / 100;
+      for (const b of remainingBookings) {
+          b.status = BookingStatus.PENDING_PAYMENT; // Ensure it's still pending_payment
+          b.amount = newPricePerSession;
+          await queryRunner.manager.save(Booking, b);
+      }
+
+      await queryRunner.manager.save(BookingPackage, pkg);
+
+      await queryRunner.commitTransaction();
+
+      return res.json({
+        message: "Session removed from package",
+        package: pkg,
+        remainingBookings
+      });
+
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      console.error("Remove session error:", error);
+      return res.status(500).json({ error: "Failed to remove session from package" });
+    } finally {
+      await queryRunner.release();
     }
   };
 }

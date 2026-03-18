@@ -113,6 +113,11 @@ class ZoomService {
             const data = await response.json() as any;
 
             if (!response.ok) {
+                console.error("Zoom Create Meeting Failed:", {
+                    status: response.status,
+                    statusText: response.statusText,
+                    data
+                });
                 throw new Error(`Failed to create Zoom meeting: ${data.message || response.statusText}`);
             }
 

@@ -14,6 +14,7 @@ import enrollmentRoutes from "./routes/enrollmentRoutes";
 import parentRoutes from "./routes/parentRoutes";
 import availabilityRoutes from "./routes/availabilityRoutes";
 import bookingRoutes from "./routes/bookingRoutes";
+import assistantRoutes from "./routes/assistantRoutes";
 import profileRoutes from "./routes/profileRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import contentRoutes from "./routes/contentRoutes";
@@ -46,6 +47,19 @@ const app: Application = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+app.use(async (req: Request, res: Response, next) => {
+  if (!AppDataSource.isInitialized) {
+    try {
+      await AppDataSource.initialize();
+      console.log("✓ Database connected successfully (Serverless)");
+    } catch (error) {
+      console.error("✗ Database connection failed:", error);
+      return res.status(500).json({ error: "Database connection failed" });
+    }
+  }
+  next();
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || "http://localhost:3000",
   credentials: true,
@@ -68,8 +82,6 @@ app.use(
   })
 );
 
-// MUST be before express.json() because webhook needs raw buffer
-app.use("/api/payments", paymentRoutes);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -104,6 +116,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 // API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/lessons", lessonRoutes);
@@ -111,6 +124,7 @@ app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/parent", parentRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/assistants", assistantRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/content", contentRoutes);
@@ -125,28 +139,30 @@ app.use("/api/progress-reports", progressReportRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api", userRoutes);
 
-// Initialize Database and Start Server
-AppDataSource.initialize()
-  .then(() => {
-    console.log("✓ Database connected successfully");
+if (!process.env.VERCEL) {
+  // Initialize Database and Start Server
+  AppDataSource.initialize()
+    .then(() => {
+      console.log("✓ Database connected successfully");
 
-    app.listen(PORT, () => {
-      console.log(`✓ Server is running on port ${PORT}`);
-      console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+      app.listen(PORT, () => {
+        console.log(`✓ Server is running on port ${PORT}`);
+        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
 
-      // Start background jobs
-      RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
-      startPayoutJob();
-      startBookingCleanupJob();
-      startReminderJob();
-      startParentReportJob();
-      startPerformanceAlertJob();
+        // Start background jobs
+        RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
+        startPayoutJob();
+        startBookingCleanupJob();
+        startReminderJob();
+        startParentReportJob();
+        startPerformanceAlertJob();
+      });
+    })
+    .catch((error) => {
+      console.error("✗ Database connection failed:", error);
+      process.exit(1);
     });
-  })
-  .catch((error) => {
-    console.error("✗ Database connection failed:", error);
-    process.exit(1);
-  });
+}
 
 export default app;
 

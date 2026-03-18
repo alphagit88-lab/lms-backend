@@ -12,6 +12,8 @@ import { Payment } from "./Payment";
 
 export enum TransactionType {
   PAYMENT = "payment",
+  PAYHERE = "payhere",
+  MANUAL = "manual",
   REFUND = "refund",
   PAYOUT = "payout",
   PLATFORM_FEE = "platform_fee",

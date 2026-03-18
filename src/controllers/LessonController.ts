@@ -113,8 +113,8 @@ export class LessonController {
         }
       }
 
-      // Students need to be enrolled
-      if (!isInstructor && !isAdmin && !isEnrolled) {
+      // Students need to be enrolled (preview lessons are accessible without enrollment)
+      if (!isInstructor && !isAdmin && !isEnrolled && !lesson.isPreview) {
         return res.status(403).json({ error: "Enrollment required" });
       }
 

@@ -131,6 +131,10 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ZOOM_ACCOUNT_ID=your_zoom_account_id
 ZOOM_CLIENT_ID=your_zoom_client_id
 ZOOM_CLIENT_SECRET=your_zoom_client_secret
+# Optional: mark Zoom account as free plan to enforce 40-minute guidance
+# Either of the following can be used:
+# ZOOM_IS_FREE_PLAN=true
+# ZOOM_PLAN=free
 
 # Email (Mailtrap sandbox for dev — replace with real SMTP for production)
 SMTP_HOST=sandbox.smtp.mailtrap.io

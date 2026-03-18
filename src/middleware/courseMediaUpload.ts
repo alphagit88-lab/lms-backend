@@ -1,0 +1,52 @@
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
+
+// Ensure uploads/course-media directory exists
+const COURSE_MEDIA_DIR = path.join(process.cwd(), "uploads", "course-media");
+if (!fs.existsSync(COURSE_MEDIA_DIR)) {
+    fs.mkdirSync(COURSE_MEDIA_DIR, { recursive: true });
+}
+
+// Allowed file types (Images for thumbnail, Videos for preview)
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm"];
+const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm"];
+const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+
+const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => {
+        cb(null, COURSE_MEDIA_DIR);
+    },
+    filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const uniqueName = `${crypto.randomUUID()}${ext}`;
+        cb(null, uniqueName);
+    },
+});
+
+const fileFilter = (
+    _req: Express.Request,
+    file: Express.Multer.File,
+    cb: multer.FileFilterCallback
+) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        return cb(new Error(`Invalid file type. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`));
+    }
+
+    if (!ALLOWED_TYPES.includes(file.mimetype)) {
+        return cb(new Error(`Invalid MIME type: ${file.mimetype}`));
+    }
+
+    cb(null, true);
+};
+
+export const courseMediaUpload = multer({
+    storage,
+    fileFilter,
+    limits: {
+        fileSize: MAX_SIZE,
+    },
+});

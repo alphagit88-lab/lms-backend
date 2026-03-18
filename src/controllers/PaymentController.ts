@@ -17,6 +17,8 @@ export class PaymentController {
     async manualConfirm(req: Request, res: Response) {
         try {
             const paymentId = req.params.paymentId as string;
+            const role = req.session.userRole!;
+            const userId = req.session.userId!;
 
             const paymentRepo = AppDataSource.getRepository(Payment);
             const payment = await paymentRepo.findOne({ where: { id: paymentId } });
@@ -29,8 +31,44 @@ export class PaymentController {
                 return res.status(400).json({ error: "Payment already completed." });
             }
 
+            // Security check: Instructors can only confirm payments where they are the recipient
+            // Or if it's a course enrollment for their course.
+            if (role === "instructor") {
+                let authorized = false;
+                if (payment.recipientId === userId) {
+                    authorized = true;
+                } else if (payment.paymentType === "course_enrollment" && payment.referenceId) {
+                    const { Course } = await import("../entities/Course");
+                    const course = await AppDataSource.getRepository(Course).findOne({ where: { id: payment.referenceId } });
+                    if (course && course.instructorId === userId) authorized = true;
+                } else if (payment.paymentType === "bulk_course_enrollment" && payment.metadata && Array.isArray(payment.metadata.courseIds)) {
+                    const { Course } = await import("../entities/Course");
+                    const { In } = await import("typeorm");
+                    const courses = await AppDataSource.getRepository(Course).find({ 
+                        where: { id: In(payment.metadata.courseIds) },
+                        select: ["instructorId"]
+                    });
+                    if (courses.some(c => c.instructorId === userId)) authorized = true;
+                } else if (payment.paymentType === "booking_session" && payment.referenceId) {
+                    const { Booking } = await import("../entities/Booking");
+                    const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: payment.referenceId } });
+                    if (booking && booking.teacherId === userId) authorized = true;
+                }
+                if (!authorized) {
+                    return res.status(403).json({ error: "You are not authorized to confirm this payment." });
+                }
+            }
+
             // Trigger the same fulfillment logic used by the PayHere notify endpoint
             const result = await paymentService.confirmPaymentSuccess(paymentId);
+
+            // Send success notification to the student (and instructor/admin)
+            const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
+            if (payer) {
+                void NotificationService.notifyPaymentSuccess(payment, payer);
+                void NotificationService.notifyPaymentEvent(payment, payer, "success");
+            }
+
             return res.json({
                 message: "Payment confirmed and fulfillment completed successfully.",
                 payment: result,
@@ -38,6 +76,88 @@ export class PaymentController {
         } catch (error: any) {
             console.error("Manual confirm error:", error);
             return res.status(500).json({ error: error.message || "Failed to confirm payment." });
+        }
+    }
+
+    /**
+     * Manually cancel a pending payment (Admin/Instructor)
+     * POST /api/payments/:paymentId/cancel
+     */
+    async manualCancel(req: Request, res: Response) {
+        try {
+            const paymentId = req.params.paymentId as string;
+            const role = req.session.userRole!;
+            const userId = req.session.userId!;
+
+            const paymentRepo = AppDataSource.getRepository(Payment);
+            const payment = await paymentRepo.findOne({ where: { id: paymentId } });
+
+            if (!payment) {
+                return res.status(404).json({ error: "Payment not found." });
+            }
+
+            if (payment.paymentStatus === PaymentStatus.COMPLETED) {
+                return res.status(400).json({ error: "Payment already completed and cannot be cancelled." });
+            }
+            if (payment.paymentStatus === PaymentStatus.FAILED) {
+                return res.status(400).json({ error: "Payment is already cancelled." });
+            }
+            if (payment.paymentStatus === PaymentStatus.REFUNDED) {
+                return res.status(400).json({ error: "Payment is refunded." });
+            }
+
+            // Security check: Instructors can only cancel payments where they are the recipient
+            // Or if it's a course enrollment for their course.
+            if (role === "instructor") {
+                let authorized = false;
+                if (payment.recipientId === userId) {
+                    authorized = true;
+                } else if (payment.paymentType === "course_enrollment" && payment.referenceId) {
+                    const { Course } = await import("../entities/Course");
+                    const course = await AppDataSource.getRepository(Course).findOne({ where: { id: payment.referenceId } });
+                    if (course && course.instructorId === userId) authorized = true;
+                } else if (payment.paymentType === "bulk_course_enrollment" && payment.metadata && Array.isArray(payment.metadata.courseIds)) {
+                    const { Course } = await import("../entities/Course");
+                    const { In } = await import("typeorm");
+                    const courses = await AppDataSource.getRepository(Course).find({ 
+                        where: { id: In(payment.metadata.courseIds) },
+                        select: ["instructorId"]
+                    });
+                    if (courses.some(c => c.instructorId === userId)) authorized = true;
+                } else if (payment.paymentType === "booking_session" && payment.referenceId) {
+                    const { Booking } = await import("../entities/Booking");
+                    const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: payment.referenceId } });
+                    if (booking && booking.teacherId === userId) authorized = true;
+                }
+                if (!authorized) {
+                    return res.status(403).json({ error: "You are not authorized to cancel this payment." });
+                }
+            }
+
+            // Trigger failure logic
+            const result = await paymentService.confirmPaymentFailure(paymentId, "Manually cancelled by instructor/admin.");
+            
+            // Send rejection notification
+            const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
+            if (payer) {
+                const { NotificationType } = require("../entities/Notification");
+                void NotificationService.createInApp(
+                    payer.id,
+                    NotificationType.PAYMENT_FAILED,
+                    "Payment Cancelled",
+                    `Your payment intent for ${payment.currency} ${Number(payment.amount).toFixed(2)} was cancelled.`,
+                    payment.id,
+                    "/payments"
+                );
+            }
+
+            return res.json({
+                message: "Payment cancelled successfully.",
+                payment: result,
+            });
+        } catch (error: any) {
+            console.error("Manual cancel error:", error);
+            return res.status(500).json({ error: error.message || "Failed to cancel payment." });
         }
     }
 
@@ -61,7 +181,7 @@ export class PaymentController {
                 phone,
             } = req.body;
 
-            if (!type || !referenceId || !amount) {
+            if (!type || !referenceId || amount === undefined || amount === null) {
                 return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
             }
 
@@ -176,7 +296,10 @@ export class PaymentController {
                         const payment = await paymentRepo.findOne({ where: { id: order_id } });
                         if (payment) {
                             const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
-                            if (payer) void NotificationService.notifyPaymentSuccess(payment, payer);
+                            if (payer) {
+                                void NotificationService.notifyPaymentSuccess(payment, payer);
+                                void NotificationService.notifyPaymentEvent(payment, payer, "success");
+                            }
                         }
                     }
                     break;
@@ -223,6 +346,28 @@ export class PaymentController {
         }
     }
 
+    async getPayments(req: Request, res: Response) {
+        try {
+            const { page = "1", limit = "20", status, method } = req.query;
+            const role = req.session.userRole!;
+            const userId = req.session.userId!;
+
+            const result = await paymentService.getFilteredPayments({
+                role,
+                requestingUserId: userId,
+                page: parseInt(page as string, 10),
+                limit: parseInt(limit as string, 10),
+                status: status as string,
+                method: method as any,
+            });
+
+            return res.json(result);
+        } catch (error: any) {
+            console.error("Get payments error:", error);
+            return res.status(500).json({ error: "Failed to fetch payments." });
+        }
+    }
+
     async getTransactions(req: Request, res: Response) {
         try {
             const { type } = req.query;
@@ -254,7 +399,7 @@ export class PaymentController {
     async createBankTransferIntent(req: Request, res: Response) {
         try {
             const { type, referenceId, amount, currency = "LKR", recipientId } = req.body;
-            if (!type || !referenceId || !amount) {
+            if (!type || !referenceId || amount === undefined || amount === null) {
                 return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
             }
             const result = await paymentService.initializeBankTransferPayment({
@@ -328,6 +473,29 @@ export class PaymentController {
             }
             const reviewAction = action as "approve" | "reject";
             const payment = await paymentService.reviewManualPayment(paymentId, reviewAction, note);
+            
+            // Notify student of approval/rejection
+            const { NotificationService } = require("../services/NotificationService");
+            const { User } = require("../entities/User");
+            const { AppDataSource } = require("../config/data-source");
+            const payer = await AppDataSource.getRepository(User).findOne({ where: { id: payment.userId } });
+            
+            if (payer) {
+                const { NotificationType } = require("../entities/Notification");
+                if (reviewAction === "approve") {
+                    void NotificationService.notifyPaymentSuccess(payment, payer);
+                } else if (reviewAction === "reject") {
+                    void NotificationService.createInApp(
+                        payer.id,
+                        NotificationType.PAYMENT_FAILED,
+                        "Bank Slip Rejected",
+                        `Your bank slip for ${payment.currency} ${Number(payment.amount).toFixed(2)} was rejected: ${note || "Invalid slip"}.`,
+                        payment.id,
+                        "/payments"
+                    );
+                }
+            }
+
             return res.json({ message: `Payment ${action}d successfully.`, payment });
         } catch (error: any) {
             return res.status(500).json({ error: error.message || "Failed to review payment." });
@@ -399,6 +567,51 @@ export class PaymentController {
                 return res.status(422).json({ error: msg });
             }
             return res.status(500).json({ error: msg });
+        }
+    }
+
+    /** GET /api/payments/:id/status — user status check */
+    async getPaymentStatus(req: Request, res: Response) {
+        try {
+            const id = String(req.params.id);
+            const userId = req.session.userId!;
+            const payment = await paymentService.getPaymentStatus(id, userId);
+            return res.json({ 
+                paymentId: payment.id,
+                status: payment.paymentStatus,
+                type: payment.paymentType,
+                referenceId: payment.referenceId
+            });
+        } catch (error: any) {
+            return res.status(error.message.includes("not found") ? 404 : 500).json({ error: error.message });
+        }
+    }
+
+    /** POST /api/payments/:id/verify — manual check (useful for local dev or network issues) */
+    async verifyPayment(req: Request, res: Response) {
+        try {
+            const id = String(req.params.id);
+            const userId = req.session.userId!;
+            const { force = false } = req.body;
+
+            const payment = await paymentService.getPaymentStatus(id, userId);
+
+            if (payment.paymentStatus === PaymentStatus.COMPLETED) {
+                return res.json({ success: true, message: "Payment already confirmed." });
+            }
+
+            // In Local Dev Mode, allow manual confirmation if requested
+            const isLocal = String(req.headers.host).includes("localhost") || process.env.NODE_ENV === "development";
+            if (isLocal && force === true) {
+                console.warn(`[DEV] Manual override confirmation for payment ${id} by user ${userId}`);
+                await paymentService.confirmPaymentSuccess(id);
+                return res.json({ success: true, message: "Payment forced completed (DEV MODE)." });
+            }
+
+            // TODO: In production, this could call PayHere Status API if we have access
+            return res.json({ success: false, message: "Payment is still pending. Please wait for the system to process the update." });
+        } catch (error: any) {
+            return res.status(error.message.includes("not found") ? 404 : 500).json({ error: error.message });
         }
     }
 }

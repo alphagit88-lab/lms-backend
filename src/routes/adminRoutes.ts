@@ -31,7 +31,8 @@ router.post("/payouts/:id/process", AdminController.processPayout);
 router.get("/payments", AdminController.getPayments);
 router.get("/payments/bank-transfer/pending", paymentController.getPendingManualPayments.bind(paymentController));
 router.post("/payments/bank-transfer/:paymentId/review", express.json(), paymentController.reviewManualPayment.bind(paymentController));
-router.post("/payments/:paymentId/confirm", express.json(), paymentController.manualConfirm);
+router.post("/payments/:paymentId/confirm", express.json(), paymentController.manualConfirm.bind(paymentController));
+router.post("/payments/:paymentId/cancel", express.json(), paymentController.manualCancel.bind(paymentController));
 router.get("/enrollments", AdminController.getEnrollments);
 
 // Parent Management

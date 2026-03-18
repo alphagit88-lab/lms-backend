@@ -10,6 +10,9 @@ router.use(authenticate);
 // GET /api/sessions/upcoming - Get upcoming sessions for current user
 router.get("/upcoming", SessionController.getUpcomingSessions);
 
+// GET /api/sessions - Get sessions with filters (type=upcoming|past, status)
+router.get("/", SessionController.getSessions);
+
 // POST /api/sessions - Create an ad-hoc session (Teacher/Admin only)
 router.post(
     "/",

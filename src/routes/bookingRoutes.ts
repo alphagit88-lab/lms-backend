@@ -20,8 +20,10 @@ router.get(
 router.post("/package", authenticate, BookingController.createPackageBooking);
 router.get("/packages", authenticate, BookingController.getMyPackages);
 router.get("/packages/:id", authenticate, BookingController.getPackageById);
+router.post("/packages/:id/remove-session/:bookingId", authenticate, BookingController.removeSessionFromPackage);
 
 router.get("/:id/cancellation-policy", authenticate, BookingController.getCancellationPolicy);
+router.post("/:id/sync-payment", authenticate, BookingController.syncBookingPayment);
 
 router.put("/:id/cancel", authenticate, BookingController.cancelBooking);
 

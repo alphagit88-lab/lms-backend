@@ -33,6 +33,7 @@ export enum PaymentType {
   COURSE_ENROLLMENT = "course_enrollment",
   BULK_COURSE_ENROLLMENT = "bulk_course_enrollment",
   BOOKING_SESSION = "booking_session",
+  BOOKING_PACKAGE = "booking_package",
   CONTENT_PURCHASE = "content_purchase",
   SUBSCRIPTION = "subscription",
 }

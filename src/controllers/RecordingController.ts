@@ -1,16 +1,20 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
+import { In } from "typeorm";
+import { Brackets } from "typeorm";
 import { Recording } from "../entities/Recording";
 import { Session } from "../entities/Session";
 import { Enrollment } from "../entities/Enrollment";
 import { Class } from "../entities/Class";
 import { Course } from "../entities/Course";
+import { Booking, BookingStatus } from "../entities/Booking";
 
 const recordingRepository = AppDataSource.getRepository(Recording);
 const sessionRepository = AppDataSource.getRepository(Session);
 const enrollmentRepository = AppDataSource.getRepository(Enrollment);
 const classRepository = AppDataSource.getRepository(Class);
 const courseRepository = AppDataSource.getRepository(Course);
+const bookingRepository = AppDataSource.getRepository(Booking);
 
 export class RecordingController {
   /**
@@ -164,10 +168,24 @@ export class RecordingController {
         queryBuilder.andWhere("class.teacherId = :teacherId", { teacherId });
       }
 
-      // Access control: students can only see public recordings or recordings from classes they booked
+      // Access control: students see public recordings + private recordings from sessions they've booked
       if (userRole === "student" && userId) {
-        // For students, show public recordings only (or implement booking-based access)
-        queryBuilder.andWhere("recording.isPublic = :isPublic", { isPublic: true });
+        // Gather all session IDs the student has a confirmed/completed booking for
+        const studentBookings = await bookingRepository.find({
+          where: { studentId: userId, status: In([BookingStatus.CONFIRMED, BookingStatus.COMPLETED]) },
+          select: ["id"],
+        });
+        const bookedIds = studentBookings.map((b) => b.id);
+
+        queryBuilder.andWhere(
+          new Brackets((qb) => {
+            qb.where("recording.isPublic = :isPublic", { isPublic: true });
+            if (bookedIds.length > 0) {
+              // Include private recordings whose session is linked to one of the student's bookings
+              qb.orWhere("session.bookingId IN (:...bookedIds)", { bookedIds });
+            }
+          })
+        );
       }
 
       queryBuilder.orderBy("recording.uploadedAt", "DESC");
@@ -381,25 +399,46 @@ export class RecordingController {
       }
     }
 
-    // Students: check if enrolled in the course
+    // Students: check if they have a confirmed/completed booking linked to this recording's session
     if (userRole === "student") {
-      if (!recording.sessionId) return false; // standalone recording — no session to check enrollment against
+      if (!recording.sessionId) return false; // standalone recording — no student access
+
       const session = await sessionRepository.findOne({
         where: { id: recording.sessionId },
-        relations: ["class"],
       });
 
-      if (session && session.classId) {
+      if (!session) return false;
+
+      // 1-on-1 session: session is directly linked to a booking
+      if (session.bookingId) {
+        const booking = await bookingRepository.findOne({
+          where: {
+            id: session.bookingId,
+            studentId: userId,
+            status: In([BookingStatus.CONFIRMED, BookingStatus.COMPLETED]),
+          },
+        });
+        if (booking) return true;
+      }
+
+      // Group class session: check if student has any confirmed booking with the teacher of that class
+      if (session.classId) {
         const classEntity = await classRepository.findOne({
           where: { id: session.classId },
         });
-
         if (classEntity) {
-          // For now, students can access public recordings only
-          // TODO: Implement booking-based access control
-          return false;
+          const booking = await bookingRepository.findOne({
+            where: {
+              studentId: userId,
+              teacherId: classEntity.teacherId,
+              status: In([BookingStatus.CONFIRMED, BookingStatus.COMPLETED]),
+            },
+          });
+          if (booking) return true;
         }
       }
+
+      return false;
     }
 
     return false;

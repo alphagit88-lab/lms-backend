@@ -27,6 +27,7 @@ router.put(
 );
 
 router.get("/teacher/me", authenticate, authorize("instructor"), ProfileController.getMyTeacherProfile);
+router.get("/teacher/:teacherId/similar", ProfileController.getSimilarTeachers);
 router.get("/teacher/:teacherId", ProfileController.getTeacherProfile);
 
 router.get("/teachers/verified", ProfileController.getVerifiedTeachers);
