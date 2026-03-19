@@ -1,17 +1,18 @@
-import { 
-  Entity, 
-  PrimaryGeneratedColumn, 
-  Column, 
-  CreateDateColumn, 
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
   OneToMany,
-  JoinColumn 
+  JoinColumn
 } from "typeorm";
 import { User } from "./User";
 import { Category } from "./Category";
 import { Lesson } from "./Lesson";
 import { Enrollment } from "./Enrollment";
+import { Exam } from "./Exam";
 
 @Entity("courses")
 export class Course {
@@ -72,6 +73,9 @@ export class Course {
   @Column({ type: "decimal", precision: 10, scale: 2, default: 0.00 })
   price!: number;
 
+  @Column({ name: "discount_percentage", type: "decimal", precision: 5, scale: 2, default: 0.00, nullable: true })
+  discountPercentage?: number;
+
   @Column({ name: "is_published", default: false })
   isPublished!: boolean;
 
@@ -107,4 +111,7 @@ export class Course {
 
   @OneToMany(() => Enrollment, (enrollment) => enrollment.course)
   enrollments!: Enrollment[];
+
+  @OneToMany(() => Exam, (exam) => exam.course)
+  exams!: Exam[];
 }

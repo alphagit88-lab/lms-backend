@@ -15,6 +15,7 @@ REST API for the Learning Management System, built with **Node.js + Express + Ty
 | Database | PostgreSQL v14+ |
 | Auth | express-session + bcryptjs |
 | Payments | Stripe |
+| Email | nodemailer v8 (Mailtrap sandbox for dev) |
 | File Uploads | Multer |
 | Video (Zoom) | Zoom Server-to-Server OAuth |
 | Scheduler | node-cron |
@@ -130,6 +131,17 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ZOOM_ACCOUNT_ID=your_zoom_account_id
 ZOOM_CLIENT_ID=your_zoom_client_id
 ZOOM_CLIENT_SECRET=your_zoom_client_secret
+# Optional: mark Zoom account as free plan to enforce 40-minute guidance
+# Either of the following can be used:
+# ZOOM_IS_FREE_PLAN=true
+# ZOOM_PLAN=free
+
+# Email (Mailtrap sandbox for dev — replace with real SMTP for production)
+SMTP_HOST=sandbox.smtp.mailtrap.io
+SMTP_PORT=2525
+SMTP_USER=your_mailtrap_user
+SMTP_PASS=your_mailtrap_pass
+SMTP_FROM=noreply@lms.lk
 ```
 
 > **Tip:** For `SESSION_SECRET`, generate a strong value with:
@@ -162,7 +174,7 @@ src/
 ├── config/          # TypeORM data source & app config
 ├── controllers/     # Route handlers (request → response)
 ├── entities/        # TypeORM entity definitions (DB tables)
-├── jobs/            # Scheduled cron jobs (payouts, etc.)
+├── jobs/            # Scheduled cron jobs (reminders, payouts, alerts, reports)
 ├── middleware/      # Auth, file upload, error handling middleware
 ├── migrations/      # TypeORM database migrations
 ├── routes/          # Express router definitions
@@ -200,6 +212,24 @@ uploads/
 | POST | `/api/payments/webhook` | Stripe webhook handler |
 | GET | `/api/recordings` | List recordings |
 | GET | `/api/instructor/earnings` | Instructor earnings summary |
+| GET | `/api/notifications` | Current user’s notifications |
+| GET | `/api/notifications/unread-count` | Unread notification count |
+| PATCH | `/api/notifications/read-all` | Mark all notifications as read |
+| PATCH | `/api/notifications/:id/read` | Mark single notification as read |
+| DELETE | `/api/notifications/:id` | Delete notification |
+| GET | `/api/progress-reports` | List progress reports (role-filtered) |
+| GET | `/api/progress-reports/:id` | Progress report detail |
+| POST | `/api/progress-reports/:id/share` | Share report with linked parents via email |
+| GET | `/api/analytics/teacher/students` | Student progress per course (instructor/admin) |
+| GET | `/api/analytics/teacher/attendance` | Booking attendance stats (instructor/admin) |
+| GET | `/api/analytics/teacher/summary` | Instructor earnings KPIs (instructor/admin) |
+| GET | `/api/analytics/teacher/earnings` | Earnings chart data by period (instructor/admin) |
+| GET | `/api/analytics/teacher/course/:courseId/performance` | Course performance metrics (instructor/admin) |
+| GET | `/api/analytics/student/exams` | Student exam history + trend (authenticated) |
+| GET | `/api/analytics/student/timeline` | Learning timeline events (authenticated) |
+| GET | `/api/analytics/admin/summary` | Platform-wide KPIs (admin) |
+| GET | `/api/analytics/admin/revenue` | Revenue chart data by period (admin) |
+| GET | `/api/analytics/admin/teachers` | Teacher activity + earnings table (admin) |
 
 For the full Postman collection see [`postman_collection.json`](./postman_collection.json).
 

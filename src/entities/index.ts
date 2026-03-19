@@ -13,6 +13,7 @@ export { LessonProgress } from "./LessonProgress";
 
 // Parent-Student linking
 export { StudentParent, LinkStatus } from "./StudentParent";
+export { TeacherAssistant } from "./TeacherAssistant";
 
 // Booking system
 export { AvailabilitySlot, SlotStatus } from "./AvailabilitySlot";

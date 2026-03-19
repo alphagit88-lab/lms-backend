@@ -29,6 +29,9 @@ router.get("/:id", ContentController.getById);
 // Check content access
 router.get("/:id/access", ContentController.checkAccess);
 
+// Stream video/audio with HTTP 206 range-request support
+router.get("/:id/stream", ContentController.stream);
+
 // Get download URL (access-controlled)
 router.get("/:id/download", ContentController.download);
 

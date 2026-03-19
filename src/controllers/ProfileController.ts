@@ -93,6 +93,8 @@ export class ProfileController {
         subjects,
         availabilityTimezone,
         autoConfirmBookings,
+        packageDiscount3Plus,
+        packageDiscount5Plus,
       } = req.body;
 
       const profileRepository = AppDataSource.getRepository(TeacherProfile);
@@ -108,6 +110,8 @@ export class ProfileController {
         if (subjects !== undefined) profile.subjects = subjects;
         if (availabilityTimezone !== undefined) profile.availabilityTimezone = availabilityTimezone;
         if (autoConfirmBookings !== undefined) profile.autoConfirmBookings = autoConfirmBookings;
+        if (packageDiscount3Plus !== undefined) profile.packageDiscount3Plus = packageDiscount3Plus;
+        if (packageDiscount5Plus !== undefined) profile.packageDiscount5Plus = packageDiscount5Plus;
       } else {
         // Create new profile
         profile = profileRepository.create({
@@ -120,6 +124,8 @@ export class ProfileController {
           subjects,
           availabilityTimezone,
           autoConfirmBookings: autoConfirmBookings ?? false,
+          packageDiscount3Plus: packageDiscount3Plus ?? 5.00,
+          packageDiscount5Plus: packageDiscount5Plus ?? 10.00,
         });
       }
 
@@ -133,6 +139,28 @@ export class ProfileController {
   };
 
   // Get Teacher Profile (Public)
+  // Get own teacher profile using session (authenticated instructor)
+  static getMyTeacherProfile = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const teacherId = req.session.userId!;
+
+      const profileRepository = AppDataSource.getRepository(TeacherProfile);
+      const profile = await profileRepository.findOne({
+        where: { teacherId },
+        relations: ["teacher"],
+      });
+
+      if (!profile) {
+        return res.status(404).json({ error: "Teacher profile not found" });
+      }
+
+      return res.json({ profile });
+    } catch (error: any) {
+      console.error("Error fetching own teacher profile:", error);
+      return res.status(500).json({ error: "Failed to fetch teacher profile" });
+    }
+  };
+
   static getTeacherProfile = async (req: Request, res: Response): Promise<Response> => {
     try {
       const teacherId = req.params.teacherId as string;
@@ -267,6 +295,63 @@ export class ProfileController {
     } catch (error: any) {
       console.error("Error verifying teacher:", error);
       return res.status(500).json({ error: "Failed to verify teacher" });
+    }
+  };
+
+  /**
+   * Get similar teachers (same subject, excluding the given teacher)
+   * GET /api/profiles/teacher/:teacherId/similar?limit=5
+   */
+  static getSimilarTeachers = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const teacherId = req.params.teacherId as string;
+      const limit = Math.min(parseInt((req.query.limit as string) ?? "5", 10), 20);
+
+      const profileRepository = AppDataSource.getRepository(TeacherProfile);
+
+      // Load source teacher to get their subjects
+      const sourceProfile = await profileRepository.findOne({ where: { teacherId } });
+      if (!sourceProfile || !sourceProfile.subjects) {
+        return res.json({ teachers: [] });
+      }
+
+      // Parse subjects — handle comma-separated string or JSON array
+      let subjectList: string[] = [];
+      try {
+        const parsed = JSON.parse(sourceProfile.subjects);
+        subjectList = Array.isArray(parsed) ? parsed : [sourceProfile.subjects];
+      } catch {
+        subjectList = sourceProfile.subjects.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+
+      if (subjectList.length === 0) {
+        return res.json({ teachers: [] });
+      }
+
+      // Build query: find other verified teachers whose subjects overlap
+      let query = profileRepository
+        .createQueryBuilder("profile")
+        .leftJoinAndSelect("profile.teacher", "teacher")
+        .where("profile.teacherId != :teacherId", { teacherId })
+        .andWhere("profile.subjects IS NOT NULL");
+
+      // OR condition for any matching subject keyword
+      const subjectConditions = subjectList.map((_, idx) => `profile.subjects LIKE :subject${idx}`);
+      const subjectParams: Record<string, string> = {};
+      subjectList.forEach((s, idx) => { subjectParams[`subject${idx}`] = `%${s}%`; });
+
+      query = query.andWhere(`(${subjectConditions.join(" OR ")})`, subjectParams);
+
+      const teachers = await query
+        .orderBy("profile.rating", "DESC")
+        .addOrderBy("profile.totalStudents", "DESC")
+        .limit(limit)
+        .getMany();
+
+      return res.json({ teachers });
+    } catch (error: any) {
+      console.error("Error fetching similar teachers:", error);
+      return res.status(500).json({ error: "Failed to fetch similar teachers" });
     }
   };
 }

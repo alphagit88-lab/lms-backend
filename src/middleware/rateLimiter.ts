@@ -1,15 +1,18 @@
 import rateLimit from "express-rate-limit";
 
+const isDev = process.env.NODE_ENV !== "production";
+
 /**
  * Rate limiter for authentication endpoints
  * Prevents brute force attacks
  */
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  max: isDev ? 1000 : 10, // Dev: unlimited; Prod: 10 attempts per 15 min
   message: "Too many login attempts from this IP, please try again after 15 minutes",
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  skip: () => isDev,
 });
 
 /**
@@ -18,10 +21,11 @@ export const authRateLimiter = rateLimit({
  */
 export const registerRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // Limit each IP to 3 registrations per hour
+  max: isDev ? 1000 : 10, // Dev: unlimited; Prod: 10 per hour
   message: "Too many registration attempts from this IP, please try again after 1 hour",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isDev,
 });
 
 /**
@@ -30,10 +34,11 @@ export const registerRateLimiter = rateLimit({
  */
 export const passwordResetRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 3, // Limit each IP to 3 reset requests per 15 minutes
+  max: isDev ? 1000 : 5, // Dev: unlimited; Prod: 5 per 15 min
   message: "Too many password reset attempts from this IP, please try again after 15 minutes",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isDev,
 });
 
 /**
@@ -42,10 +47,11 @@ export const passwordResetRateLimiter = rateLimit({
  */
 export const apiRateLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100, // Limit each IP to 100 requests per minute
+  max: isDev ? 10000 : 200, // Dev: unlimited; Prod: 200 per minute
   message: "Too many requests from this IP, please try again later",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isDev,
 });
 
 /**
@@ -54,9 +60,10 @@ export const apiRateLimiter = rateLimit({
  */
 export const uploadRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 uploads per 15 minutes
+  max: isDev ? 1000 : 20, // Dev: unlimited; Prod: 20 uploads per 15 min
   message: "Too many file uploads from this IP, please try again after 15 minutes",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => isDev,
 });
 

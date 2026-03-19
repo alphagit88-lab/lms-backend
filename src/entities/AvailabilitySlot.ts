@@ -68,8 +68,11 @@ export class AvailabilitySlot {
   @Column({ name: "current_bookings", default: 0 })
   currentBookings!: number;
 
-  @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
+  @Column({ name: "price", type: "decimal", precision: 10, scale: 2, nullable: true })
   price?: number;
+
+  @Column({ name: "discount_percentage", type: "decimal", precision: 5, scale: 2, default: 0.00, nullable: true })
+  discountPercentage?: number;
 
   @Column({ type: "text", nullable: true })
   notes?: string;

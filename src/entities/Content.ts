@@ -21,9 +21,24 @@ export enum ContentType {
   OTHER = "other",
 }
 
+export enum AcademicResourceType {
+  PAST_PAPER = "past_paper",
+  MODEL_PAPER = "model_paper",
+  TEACHER_PAPER = "teacher_paper",
+  MARKING_SCHEME = "marking_scheme",
+  MARK_SHEET = "mark_sheet",
+  TUTORIAL = "tutorial",
+  LESSON_NOTES = "lesson_notes",
+  REFERENCE_MATERIAL = "reference_material",
+  PAPER_DISCUSSION = "paper_discussion",
+  OTHER = "other",
+}
+
 @Entity("contents")
 @Index(["teacherId", "contentType"])
 @Index(["isPaid", "isPublished"])
+@Index(["resourceType"])
+@Index(["subject", "grade", "topic"])
 export class Content {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
@@ -38,6 +53,15 @@ export class Content {
     enum: Object.values(ContentType),
   })
   contentType!: ContentType;
+
+  @Column({
+    name: "resource_type",
+    type: "varchar",
+    length: 50,
+    enum: Object.values(AcademicResourceType),
+    default: AcademicResourceType.OTHER,
+  })
+  resourceType!: AcademicResourceType;
 
   @Column({ length: 200 })
   title!: string;
@@ -80,6 +104,9 @@ export class Content {
 
   @Column({ length: 50, nullable: true, comment: "Grade level" })
   grade?: string;
+
+  @Column({ length: 100, nullable: true, comment: "Specific topic within the subject" })
+  topic?: string;
 
   @Column({ type: "json", nullable: true, comment: "Tags, keywords" })
   metadata?: any;

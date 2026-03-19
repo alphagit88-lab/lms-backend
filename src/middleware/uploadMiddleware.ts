@@ -11,6 +11,7 @@ const MAX_FILE_SIZES = {
   presentation: 100 * 1024 * 1024, // 100MB
   worksheet: 10 * 1024 * 1024, // 10MB
   quiz: 10 * 1024 * 1024, // 10MB
+  image: 10 * 1024 * 1024, // 10MB
   other: 50 * 1024 * 1024, // 50MB
 };
 
@@ -32,6 +33,9 @@ const ALLOWED_DOCUMENT_TYPES = [
 ];
 const ALLOWED_DOCUMENT_EXTENSIONS = [".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"];
 
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+
 // All allowed types combined — used in fileFilter so we can accept ANY known
 // valid file at this stage. Per-contentType enforcement happens AFTER multer
 // has parsed req.body (see validateContentType below).
@@ -39,11 +43,13 @@ const ALL_ALLOWED_TYPES = [
   ...ALLOWED_VIDEO_TYPES,
   ...ALLOWED_AUDIO_TYPES,
   ...ALLOWED_DOCUMENT_TYPES,
+  ...ALLOWED_IMAGE_TYPES,
 ];
 const ALL_ALLOWED_EXTENSIONS = [
   ...ALLOWED_VIDEO_EXTENSIONS,
   ...ALLOWED_AUDIO_EXTENSIONS,
   ...ALLOWED_DOCUMENT_EXTENSIONS,
+  ...ALLOWED_IMAGE_EXTENSIONS,
 ];
 
 /**
@@ -97,13 +103,15 @@ export const validateContentType = (
   const mismatch = (
     (contentType === "video" && !ALLOWED_VIDEO_EXTENSIONS.includes(ext)) ||
     (contentType === "audio" && !ALLOWED_AUDIO_EXTENSIONS.includes(ext)) ||
-    (!(["video", "audio"] as string[]).includes(contentType) && !ALLOWED_DOCUMENT_EXTENSIONS.includes(ext))
+    (contentType === "image" && !ALLOWED_IMAGE_EXTENSIONS.includes(ext)) ||
+    (!((["video", "audio", "image"] as string[])).includes(contentType) && !ALLOWED_DOCUMENT_EXTENSIONS.includes(ext))
   );
 
   if (mismatch) {
     const allowed =
       contentType === "video" ? ALLOWED_VIDEO_EXTENSIONS :
       contentType === "audio" ? ALLOWED_AUDIO_EXTENSIONS :
+      contentType === "image" ? ALLOWED_IMAGE_EXTENSIONS :
       ALLOWED_DOCUMENT_EXTENSIONS;
     return res.status(400).json({
       error: `Invalid file for content type "${contentType}". Allowed extensions: ${allowed.join(", ")}`,

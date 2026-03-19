@@ -12,6 +12,8 @@ import { Payment } from "./Payment";
 
 export enum TransactionType {
   PAYMENT = "payment",
+  PAYHERE = "payhere",
+  MANUAL = "manual",
   REFUND = "refund",
   PAYOUT = "payout",
   PLATFORM_FEE = "platform_fee",
@@ -40,7 +42,7 @@ export class Transaction {
   @Column({ type: "decimal", precision: 10, scale: 2 })
   amount!: number;
 
-  @Column({ length: 3, default: "USD" })
+  @Column({ length: 3, default: "LKR" })
   currency!: string;
 
   @Column({ type: "text", nullable: true })

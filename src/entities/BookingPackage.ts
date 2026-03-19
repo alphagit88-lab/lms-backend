@@ -25,8 +25,8 @@ export class BookingPackage {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ name: "teacher_id" })
-  teacherId!: string;
+  @Column({ name: "teacher_id", nullable: true, comment: "Optional if package contains multiple instructors" })
+  teacherId?: string;
 
   @Column({ name: "student_id" })
   studentId!: string;

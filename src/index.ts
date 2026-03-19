@@ -14,6 +14,7 @@ import enrollmentRoutes from "./routes/enrollmentRoutes";
 import parentRoutes from "./routes/parentRoutes";
 import availabilityRoutes from "./routes/availabilityRoutes";
 import bookingRoutes from "./routes/bookingRoutes";
+import assistantRoutes from "./routes/assistantRoutes";
 import profileRoutes from "./routes/profileRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import contentRoutes from "./routes/contentRoutes";
@@ -26,9 +27,19 @@ import { requestIdMiddleware } from "./middleware/requestId";
 import path from "path";
 import sessionRoutes from "./routes/sessionRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
+import examRoutes from "./routes/examRoutes";
+import questionRoutes from "./routes/questionRoutes";
+import submissionRoutes from "./routes/submissionRoutes";
+import gradingRoutes from "./routes/gradingRoutes";
+import notificationRoutes from "./routes/notificationRoutes";
+import progressReportRoutes from "./routes/progressReportRoutes";
+import analyticsRoutes from "./routes/analyticsRoutes";
 import { RecordingFetchJob } from "./jobs/RecordingFetchJob";
 import { startPayoutJob } from "./jobs/PayoutJob";
 import { startBookingCleanupJob } from "./jobs/BookingCleanupJob";
+import { startReminderJob } from "./jobs/ReminderJob";
+import { startParentReportJob } from "./jobs/ParentReportJob";
+import { startPerformanceAlertJob } from "./jobs/PerformanceAlertJob";
 
 dotenv.config();
 
@@ -36,6 +47,19 @@ const app: Application = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+app.use(async (req: Request, res: Response, next) => {
+  if (!AppDataSource.isInitialized) {
+    try {
+      await AppDataSource.initialize();
+      console.log("✓ Database connected successfully (Serverless)");
+    } catch (error) {
+      console.error("✗ Database connection failed:", error);
+      return res.status(500).json({ error: "Database connection failed" });
+    }
+  }
+  next();
+});
+
 app.use(cors({
   origin: process.env.CORS_ORIGIN || "http://localhost:3000",
   credentials: true,
@@ -79,8 +103,6 @@ app.use(
   })
 );
 
-// MUST be before express.json() because webhook needs raw buffer
-app.use("/api/payments", paymentRoutes);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -115,6 +137,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 // API Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/lessons", lessonRoutes);
@@ -122,13 +145,22 @@ app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/parent", parentRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/assistants", assistantRoutes);
 app.use("/api/profiles", profileRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/content", contentRoutes);
 app.use("/api/recordings", recordingRoutes);
 app.use("/api/sessions", sessionRoutes);
+app.use("/api/exams", examRoutes);
+app.use("/api/questions", questionRoutes);
+app.use("/api/submissions", submissionRoutes);
+app.use("/api/grading", gradingRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/progress-reports", progressReportRoutes);
+app.use("/api/analytics", analyticsRoutes);
 app.use("/api", userRoutes);
 
+<<<<<<< HEAD
 // Internal endpoint for Vercel Cron / manual triggering
 // (Vercel doesn't run long-lived background intervals, so we expose a trigger endpoint.)
 app.all("/api/internal/jobs/recordings-fetch", async (req: Request, res: Response) => {
@@ -161,10 +193,28 @@ if (!process.env.VERCEL) {
         console.log(`✓ Server is running on port ${PORT}`);
         console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
 
+=======
+if (!process.env.VERCEL) {
+  // Initialize Database and Start Server
+  AppDataSource.initialize()
+    .then(() => {
+      console.log("✓ Database connected successfully");
+
+      app.listen(PORT, () => {
+        console.log(`✓ Server is running on port ${PORT}`);
+        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+
+>>>>>>> 9df40cc0ad4afa28153de6a31fee9b3f1661a104
         // Start background jobs
         RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
         startPayoutJob();
         startBookingCleanupJob();
+<<<<<<< HEAD
+=======
+        startReminderJob();
+        startParentReportJob();
+        startPerformanceAlertJob();
+>>>>>>> 9df40cc0ad4afa28153de6a31fee9b3f1661a104
       });
     })
     .catch((error) => {

@@ -25,7 +25,7 @@ export class EnrollmentController {
 
       const enrollments = await enrollmentRepository.find({
         where: { studentId: userId },
-        relations: ["course", "course.instructor", "course.category"],
+        relations: ["course", "course.instructor", "course.category", "course.lessons"],
         order: { enrolledAt: "DESC" },
       });
 
@@ -148,6 +148,119 @@ export class EnrollmentController {
     } catch (error) {
       console.error("Enroll error:", error);
       res.status(500).json({ error: "Failed to enroll in course" });
+    }
+  }
+
+  /**
+   * Bulk enroll in multiple courses
+   * POST /api/enrollments/bulk
+   */
+  static async bulkEnroll(req: Request, res: Response) {
+    try {
+      const userId = req.session.userId;
+      const { courseIds } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      if (!Array.isArray(courseIds) || courseIds.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "courseIds must be a non-empty array" });
+      }
+
+      const results: {
+        courseId: string;
+        status: "enrolled" | "already_enrolled" | "failed";
+        message: string;
+        enrollment?: object;
+      }[] = [];
+
+      for (const courseId of courseIds) {
+        try {
+          // Check course exists and is published
+          const course = await courseRepository.findOne({
+            where: { id: courseId as string },
+          });
+
+          if (!course) {
+            results.push({
+              courseId,
+              status: "failed",
+              message: "Course not found",
+            });
+            continue;
+          }
+
+          if (!course.isPublished) {
+            results.push({
+              courseId,
+              status: "failed",
+              message: "Course is not published",
+            });
+            continue;
+          }
+
+          // Check if already enrolled
+          const existingEnrollment = await enrollmentRepository.findOne({
+            where: { studentId: userId, courseId },
+          });
+
+          if (existingEnrollment) {
+            results.push({
+              courseId,
+              status: "already_enrolled",
+              message: "Already enrolled in this course",
+              enrollment: existingEnrollment,
+            });
+            continue;
+          }
+
+          // Create enrollment
+          const enrollment = enrollmentRepository.create({
+            studentId: userId,
+            courseId,
+            status: "active",
+            progressPercentage: 0,
+          });
+
+          await enrollmentRepository.save(enrollment);
+          await courseRepository.increment(
+            { id: courseId },
+            "enrollmentCount",
+            1
+          );
+
+          results.push({
+            courseId,
+            status: "enrolled",
+            message: "Successfully enrolled",
+            enrollment,
+          });
+        } catch {
+          results.push({
+            courseId,
+            status: "failed",
+            message: "Unexpected error during enrollment",
+          });
+        }
+      }
+
+      const enrolled = results.filter((r) => r.status === "enrolled").length;
+      const alreadyEnrolled = results.filter(
+        (r) => r.status === "already_enrolled"
+      ).length;
+      const failed = results.filter((r) => r.status === "failed").length;
+
+      res.status(207).json({
+        message: `Bulk enrollment complete: ${enrolled} enrolled, ${alreadyEnrolled} already enrolled, ${failed} failed`,
+        results,
+        summary: { enrolled, alreadyEnrolled, failed, total: courseIds.length },
+      });
+    } catch (error) {
+      console.error("Bulk enroll error:", error);
+      res.status(500).json({ error: "Failed to process bulk enrollment" });
     }
   }
 
