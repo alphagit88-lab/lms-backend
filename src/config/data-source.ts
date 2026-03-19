@@ -1,6 +1,34 @@
 import { DataSource } from "typeorm";
 import dotenv from "dotenv";
-import path from "path";
+
+// --- Explicit entity imports (required for Vercel serverless bundling) ---
+import { User } from "../entities/User";
+import { Category } from "../entities/Category";
+import { Course } from "../entities/Course";
+import { Lesson } from "../entities/Lesson";
+import { Enrollment } from "../entities/Enrollment";
+import { LessonProgress } from "../entities/LessonProgress";
+import { StudentParent } from "../entities/StudentParent";
+import { TeacherAssistant } from "../entities/TeacherAssistant";
+import { AvailabilitySlot } from "../entities/AvailabilitySlot";
+import { Booking } from "../entities/Booking";
+import { BookingPackage } from "../entities/BookingPackage";
+import { Payment } from "../entities/Payment";
+import { Transaction } from "../entities/Transaction";
+import { Payout } from "../entities/Payout";
+import { Exam } from "../entities/Exam";
+import { Question } from "../entities/Question";
+import { QuestionOption } from "../entities/QuestionOption";
+import { AnswerSubmission } from "../entities/AnswerSubmission";
+import { Class } from "../entities/Class";
+import { Session } from "../entities/Session";
+import { Recording } from "../entities/Recording";
+import { StudentProfile } from "../entities/StudentProfile";
+import { TeacherProfile } from "../entities/TeacherProfile";
+import { ParentProfile } from "../entities/ParentProfile";
+import { ProgressReport } from "../entities/ProgressReport";
+import { Notification } from "../entities/Notification";
+import { Content } from "../entities/Content";
 
 dotenv.config();
 
@@ -14,7 +42,16 @@ export const AppDataSource = new DataSource({
   ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
   synchronize: process.env.NODE_ENV === "development",
   logging: process.env.NODE_ENV === "development",
-  entities: [path.join(__dirname, "../entities/**/*.{ts,js}")],
-  migrations: [path.join(__dirname, "../migrations/**/*.{ts,js}")],
-  subscribers: [path.join(__dirname, "../subscribers/**/*.{ts,js}")],
+  entities: [
+    User, Category, Course, Lesson, Enrollment, LessonProgress,
+    StudentParent, TeacherAssistant,
+    AvailabilitySlot, Booking, BookingPackage,
+    Payment, Transaction, Payout,
+    Exam, Question, QuestionOption, AnswerSubmission,
+    Class, Session, Recording,
+    StudentProfile, TeacherProfile, ParentProfile,
+    ProgressReport, Notification, Content,
+  ],
+  migrations: [],
+  subscribers: [],
 });

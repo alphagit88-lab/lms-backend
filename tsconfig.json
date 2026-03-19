@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
-    "rootDir": ".",
+    "rootDir": "./src",
     "outDir": "./dist",
     "sourceMap": true,
     "strict": true,
@@ -17,6 +17,6 @@
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "types": ["node", "express-session"]
   },
-  "include": ["src/**/*", "api/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
