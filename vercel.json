@@ -1,5 +1,5 @@
 {
-<<<<<<< HEAD
+  "version": 2,
   "rewrites": [
     {
       "source": "/(.*)",
@@ -7,20 +7,3 @@
     }
   ]
 }
-
-=======
-  "version": 2,
-  "builds": [
-    {
-      "src": "src/index.ts",
-      "use": "@vercel/node"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "src/index.ts"
-    }
-  ]
-}
->>>>>>> 9df40cc0ad4afa28153de6a31fee9b3f1661a104
