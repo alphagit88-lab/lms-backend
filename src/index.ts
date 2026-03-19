@@ -74,13 +74,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // 2. Lazy DB init for serverless environments (e.g. Vercel)
 app.use(async (req: Request, res: Response, next) => {
+  // CRITICAL: Preflight requests (OPTIONS) MUST skip the database connection
+  // Otherwise, the browser hangs forever while the database tries to wake up.
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+
   if (!AppDataSource.isInitialized) {
     try {
+      console.log("... Connecting to database ...");
       await AppDataSource.initialize();
       console.log("✓ Database connected successfully");
     } catch (error: any) {
       console.error("✗ Database connection failed:", error);
-      // Even in error, we need to make sure headers are set (cors handled this above)
       return res.status(500).json({ 
         error: "Database connection failed", 
         message: error?.message || "Unknown error during initialization"
