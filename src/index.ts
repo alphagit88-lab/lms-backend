@@ -44,42 +44,29 @@ import { startPerformanceAlertJob } from "./jobs/PerformanceAlertJob";
 dotenv.config();
 
 const app: Application = express();
-const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(async (req: Request, res: Response, next) => {
-  if (!AppDataSource.isInitialized) {
-    try {
-      await AppDataSource.initialize();
-      console.log("✓ Database connected successfully (Serverless)");
-    } catch (error) {
-      console.error("✗ Database connection failed:", error);
-      return res.status(500).json({ error: "Database connection failed" });
-    }
-  }
-  next();
-});
-
+// 1. CORS MUST BE FIRST to ensure every response has the correct headers
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
   credentials: true,
 }));
 
 app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Lazy DB init for serverless environments (e.g. Vercel)
+// 2. Lazy DB init for serverless environments (e.g. Vercel)
 app.use(async (req: Request, res: Response, next) => {
   if (!AppDataSource.isInitialized) {
     try {
       await AppDataSource.initialize();
-      console.log("✓ Database connected (serverless/lazy init)");
+      console.log("✓ Database connected successfully");
     } catch (error: any) {
       console.error("✗ Database connection failed:", error);
-      // Detailed error for debugging deployment issues (Vercel)
+      // Even in error, we need to make sure headers are set (cors handled this above)
       return res.status(500).json({ 
         error: "Database connection failed", 
-        message: error?.message || "Unknown error occurred during connection",
-        hint: "Make sure your Vercel Environment Variables are correctly set and DB_SSL is 'true' if using Neon."
+        message: error?.message || "Unknown error during initialization"
       });
     }
   }
@@ -94,11 +81,9 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production", // Use HTTPS in production
-      // Frontend and backend are on different domains after deployment,
-      // so SameSite must be None (with secure=true) in production.
+      secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"), // 24 hours default
+      maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"),
     },
   })
 );
