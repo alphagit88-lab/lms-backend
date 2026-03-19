@@ -3,22 +3,33 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 
-const BANK_SLIPS_DIR = path.join(process.cwd(), "uploads", "bank-slips");
-if (!fs.existsSync(BANK_SLIPS_DIR)) {
-    fs.mkdirSync(BANK_SLIPS_DIR, { recursive: true });
+// On Vercel serverless, the filesystem is read-only except /tmp
+const isVercel = !!process.env.VERCEL;
+const BANK_SLIPS_DIR = isVercel
+    ? "/tmp/uploads/bank-slips"
+    : path.join(process.cwd(), "uploads", "bank-slips");
+
+if (!isVercel) {
+    try {
+        if (!fs.existsSync(BANK_SLIPS_DIR)) {
+            fs.mkdirSync(BANK_SLIPS_DIR, { recursive: true });
+        }
+    } catch { /* ignore on serverless */ }
 }
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 const ALLOWED_EXTS  = [".jpg", ".jpeg", ".png", ".webp", ".pdf"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, BANK_SLIPS_DIR),
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-});
+const storage = isVercel
+    ? multer.memoryStorage()
+    : multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, BANK_SLIPS_DIR),
+        filename: (_req, file, cb) => {
+            const ext = path.extname(file.originalname).toLowerCase();
+            cb(null, `${crypto.randomUUID()}${ext}`);
+        },
+    });
 
 const fileFilter = (
     _req: Express.Request,

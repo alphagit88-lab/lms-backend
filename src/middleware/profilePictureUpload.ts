@@ -3,10 +3,18 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 
-// Ensure uploads/profile-pictures directory exists
-const PROFILE_PICS_DIR = path.join(process.cwd(), "uploads", "profile-pictures");
-if (!fs.existsSync(PROFILE_PICS_DIR)) {
-    fs.mkdirSync(PROFILE_PICS_DIR, { recursive: true });
+// On Vercel serverless, the filesystem is read-only except /tmp
+const isVercel = !!process.env.VERCEL;
+const PROFILE_PICS_DIR = isVercel
+    ? "/tmp/uploads/profile-pictures"
+    : path.join(process.cwd(), "uploads", "profile-pictures");
+
+if (!isVercel) {
+    try {
+        if (!fs.existsSync(PROFILE_PICS_DIR)) {
+            fs.mkdirSync(PROFILE_PICS_DIR, { recursive: true });
+        }
+    } catch { /* ignore on serverless */ }
 }
 
 // Allowed image types
@@ -16,18 +24,20 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 /**
  * Multer storage configuration for profile pictures
- * Saves to uploads/profile-pictures/ with a UUID filename
+ * Uses memory storage on Vercel, disk storage locally
  */
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        cb(null, PROFILE_PICS_DIR);
-    },
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const uniqueName = `${crypto.randomUUID()}${ext}`;
-        cb(null, uniqueName);
-    },
-});
+const storage = isVercel
+    ? multer.memoryStorage()
+    : multer.diskStorage({
+        destination: (_req, _file, cb) => {
+            cb(null, PROFILE_PICS_DIR);
+        },
+        filename: (_req, file, cb) => {
+            const ext = path.extname(file.originalname).toLowerCase();
+            const uniqueName = `${crypto.randomUUID()}${ext}`;
+            cb(null, uniqueName);
+        },
+    });
 
 /**
  * File filter — only allow image files
