@@ -46,11 +46,26 @@ dotenv.config();
 const PORT = process.env.PORT || 5000;
 
 const app: Application = express();
+app.set("trust proxy", 1);
 
 // 1. CORS MUST BE FIRST to ensure every response has the correct headers
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: (origin, callback) => {
+    const allowed = [
+      process.env.FRONTEND_URL,
+      "http://localhost:3000",
+      "https://lms-frontend-chi-six.vercel.app"
+    ].filter(Boolean) as string[];
+    
+    if (!origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Cookie"]
 }));
 
 app.use(cookieParser());
