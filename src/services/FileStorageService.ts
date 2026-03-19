@@ -1,4 +1,4 @@
-import *as fs from "fs";
+import * as fs from "fs";
 import * as path from "path";
 import { randomUUID } from "crypto";
 
@@ -12,6 +12,9 @@ interface MulterFile {
   buffer: Buffer;
 }
 
+// On Vercel serverless, the filesystem is read-only except /tmp
+const isVercel = !!process.env.VERCEL;
+
 /**
  * File Storage Service
  * Currently uses local file system storage
@@ -21,8 +24,10 @@ export class FileStorageService {
   private uploadDir: string;
 
   constructor() {
-    // Use environment variable or default to 'uploads' directory
-    this.uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
+    // Use /tmp on Vercel (read-only filesystem), otherwise use 'uploads'
+    this.uploadDir = isVercel
+      ? "/tmp/uploads"
+      : (process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads"));
     this.ensureUploadDirectories();
   }
 
@@ -39,8 +44,12 @@ export class FileStorageService {
     ];
 
     dirs.forEach((dir) => {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      try {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      } catch {
+        // Silently ignore on serverless — directories may not be writable
       }
     });
   }
@@ -77,8 +86,12 @@ export class FileStorageService {
     const teacherDir = path.join(this.uploadDir, contentTypeDir, teacherId);
 
     // Ensure teacher directory exists
-    if (!fs.existsSync(teacherDir)) {
-      fs.mkdirSync(teacherDir, { recursive: true });
+    try {
+      if (!fs.existsSync(teacherDir)) {
+        fs.mkdirSync(teacherDir, { recursive: true });
+      }
+    } catch {
+      // On serverless, directory creation may fail
     }
 
     const filePath = path.join(teacherDir, fileName);
@@ -145,4 +158,3 @@ export class FileStorageService {
     }
   }
 }
-
