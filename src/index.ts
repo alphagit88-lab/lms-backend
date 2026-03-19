@@ -43,6 +43,8 @@ import { startPerformanceAlertJob } from "./jobs/PerformanceAlertJob";
 
 dotenv.config();
 
+const PORT = process.env.PORT || 5000;
+
 const app: Application = express();
 
 // 1. CORS MUST BE FIRST to ensure every response has the correct headers
@@ -87,10 +89,6 @@ app.use(
     },
   })
 );
-
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // Request ID middleware (should be early in the chain)
 app.use(requestIdMiddleware);
