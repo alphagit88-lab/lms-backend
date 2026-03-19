@@ -91,15 +91,18 @@ app.use(async (req: Request, res: Response, next) => {
 });
 
 // Session configuration
+const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
     resave: false,
     saveUninitialized: false,
+    proxy: true, // Required for secure cookies behind Vercel proxy
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      secure: isProd, // Must be true for SameSite: 'none'
+      sameSite: isProd ? "none" : "lax", // 'none' required for cross-domain Vercel cookies
       maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"),
     },
   })
