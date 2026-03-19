@@ -96,6 +96,8 @@ app.use(async (req: Request, res: Response, next) => {
   next();
 });
 
+import { getSessionStore } from "./config/session-store";
+
 // Session configuration
 const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
 
@@ -104,11 +106,12 @@ app.use(
     secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
     resave: false,
     saveUninitialized: false,
-    proxy: true, // Required for secure cookies behind Vercel proxy
+    proxy: true,
+    store: getSessionStore(),
     cookie: {
       httpOnly: true,
-      secure: isProd, // Must be true for SameSite: 'none'
-      sameSite: isProd ? "none" : "lax", // 'none' required for cross-domain Vercel cookies
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
       maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"),
     },
   })
@@ -139,7 +142,13 @@ app.get("/", (req: Request, res: Response) => {
 });
 
 app.get("/health", (req: Request, res: Response) => {
-  res.json({ status: "OK", timestamp: new Date().toISOString() });
+  res.json({ 
+    status: "OK", 
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV,
+    vercel: !!process.env.VERCEL,
+    secureCookie: (process.env.NODE_ENV === "production" || !!process.env.VERCEL)
+  });
 });
 
 // API Routes

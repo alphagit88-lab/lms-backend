@@ -29,6 +29,7 @@ import { ParentProfile } from "../entities/ParentProfile";
 import { ProgressReport } from "../entities/ProgressReport";
 import { Notification } from "../entities/Notification";
 import { Content } from "../entities/Content";
+import { AppSession } from "../entities/AppSession";
 
 dotenv.config();
 
@@ -50,7 +51,7 @@ export const AppDataSource = new DataSource({
     Exam, Question, QuestionOption, AnswerSubmission,
     Class, Session, Recording,
     StudentProfile, TeacherProfile, ParentProfile,
-    ProgressReport, Notification, Content,
+    ProgressReport, Notification, Content, AppSession,
   ],
   migrations: [],
   subscribers: [],
