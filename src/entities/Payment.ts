@@ -70,7 +70,7 @@ export class Payment {
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
   refundAmount?: number;
 
-  @Column({ length: 3, default: "USD" })
+  @Column({ length: 3, default: "LKR" })
   currency!: string;
 
   @Column({

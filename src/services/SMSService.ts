@@ -29,4 +29,18 @@ export class SMSService {
       `LMS: Hi ${recipientName}, your session on ${sessionDate} has been cancelled. Contact support for help.`
     );
   }
+
+  static async sendGradePublished(to: string, recipientName: string, examTitle: string, marks: number, total: number): Promise<void> {
+    await SMSService.sendSMS(
+      to,
+      `LMS: Hi ${recipientName}, your results for "${examTitle}" are out! Score: ${marks}/${total}. Check the app for details.`
+    );
+  }
+
+  static async sendProgressReportUpdate(to: string, parentName: string, studentName: string): Promise<void> {
+    await SMSService.sendSMS(
+      to,
+      `LMS: Hi ${parentName}, a new progress report for ${studentName} has been shared with you. View it in your dashboard.`
+    );
+  }
 }

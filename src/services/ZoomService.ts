@@ -81,10 +81,10 @@ class ZoomService {
     }
 
     /**
-     * Create a Zoom Meeting
+     * Create a Zoom Meeting (with retry on auth error)
      */
-    async createMeeting(options: ZoomMeetingOptions): Promise<ZoomMeetingResponse> {
-        const token = await this.getAccessToken();
+    async createMeeting(options: ZoomMeetingOptions, retryCount = 0): Promise<ZoomMeetingResponse> {
+        let token = await this.getAccessToken();
 
         try {
             const response = await fetch("https://api.zoom.us/v2/users/me/meetings", {
@@ -113,6 +113,14 @@ class ZoomService {
             const data = await response.json() as any;
 
             if (!response.ok) {
+                // If token is invalid or expired (401) or insufficient scope (4700/403), try refreshing once
+                if ((response.status === 401 || (data.code === 4700) || (data.code === 124)) && retryCount < 1) {
+                    console.log("Zoom Auth Error (Status:", response.status, "Code:", data.code, ") - Retrying with fresh token...");
+                    this.accessToken = null; // Clear cached token
+                    this.tokenExpiresAt = null;
+                    return this.createMeeting(options, retryCount + 1);
+                }
+
                 console.error("Zoom Create Meeting Failed:", {
                     status: response.status,
                     statusText: response.statusText,

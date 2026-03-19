@@ -72,6 +72,15 @@ export class ProgressReportController {
           courseName,
         });
 
+        if (link.parent.phone) {
+          const { SMSService } = await import("../services/SMSService");
+          void SMSService.sendProgressReportUpdate(
+            link.parent.phone,
+            link.parent.firstName,
+            studentName
+          );
+        }
+
         sharedWith++;
       }
 
@@ -109,6 +118,22 @@ export class ProgressReportController {
         qb.where("r.teacher_id = :userId", { userId });
       } else if (role === "student") {
         qb.where("r.student_id = :userId", { userId });
+      } else if (role === "parent") {
+        // Find all accepted students linked to this parent
+        const linkRepo = AppDataSource.getRepository(StudentParent);
+        const links = await linkRepo.find({
+          where: { parentId: userId, status: LinkStatus.ACCEPTED },
+          select: ["studentId"],
+        });
+        const studentIds = links.map((l) => l.studentId);
+        
+        if (studentIds.length > 0) {
+          qb.where("r.student_id IN (:...studentIds)", { studentIds });
+          qb.andWhere("r.is_shared_with_parent = :shared", { shared: true });
+        } else {
+          // If no links, return nothing
+          qb.where("1 = 0");
+        }
       }
       // admin sees all — no filter
 

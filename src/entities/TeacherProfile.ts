@@ -59,6 +59,12 @@ export class TeacherProfile {
   @Column({ name: "auto_confirm_bookings", default: false })
   autoConfirmBookings!: boolean;
 
+  @Column({ name: "package_discount_3_plus", type: "decimal", precision: 5, scale: 2, default: 5.00 })
+  packageDiscount3Plus!: number;
+
+  @Column({ name: "package_discount_5_plus", type: "decimal", precision: 5, scale: 2, default: 10.00 })
+  packageDiscount5Plus!: number;
+
   @Column({ name: "total_sessions", default: 0 })
   totalSessions!: number;
 

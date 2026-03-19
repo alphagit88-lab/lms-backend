@@ -287,6 +287,16 @@ export class NotificationService {
       totalMarks,
       examId,
     });
+
+    if (student.phone) {
+      void SMSService.sendGradePublished(
+        student.phone,
+        student.firstName,
+        examTitle,
+        marksAwarded,
+        totalMarks
+      );
+    }
   }
 
   // ─── Session Reminder ──────────────────────────────────────────────────────

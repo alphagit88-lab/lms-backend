@@ -202,6 +202,7 @@ export class CourseController {
         level,
         medium,
         price,
+        discountPercentage,
         thumbnail,
         previewVideoUrl,
       } = req.body;
@@ -238,6 +239,13 @@ export class CourseController {
         const priceValidation = validatePrice(price, 0, 1000000);
         if (!priceValidation.isValid) {
           return res.status(400).json({ error: priceValidation.error });
+        }
+      }
+
+      // Validate discount percentage if provided
+      if (discountPercentage !== undefined && discountPercentage !== null) {
+        if (discountPercentage < 0 || discountPercentage > 100) {
+          return res.status(400).json({ error: "Discount percentage must be between 0 and 100" });
         }
       }
 
@@ -284,6 +292,7 @@ export class CourseController {
         level: level || "beginner",
         medium: medium || "english",
         price: price || 0,
+        discountPercentage: discountPercentage || 0,
         thumbnail,
         previewVideoUrl,
         status: "draft",
@@ -325,6 +334,7 @@ export class CourseController {
         level,
         medium,
         price,
+        discountPercentage,
         thumbnail,
         previewVideoUrl,
         status,
@@ -382,6 +392,12 @@ export class CourseController {
       if (level !== undefined) course.level = level;
       if (medium !== undefined) course.medium = medium;
       if (price !== undefined) course.price = price;
+      if (discountPercentage !== undefined) {
+        if (discountPercentage !== null && (discountPercentage < 0 || discountPercentage > 100)) {
+          return res.status(400).json({ error: "Discount percentage must be between 0 and 100" });
+        }
+        course.discountPercentage = discountPercentage || 0;
+      }
       if (thumbnail !== undefined) course.thumbnail = thumbnail;
       if (previewVideoUrl !== undefined)
         course.previewVideoUrl = previewVideoUrl;
