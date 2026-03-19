@@ -160,7 +160,6 @@ app.use("/api/progress-reports", progressReportRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api", userRoutes);
 
-<<<<<<< HEAD
 // Internal endpoint for Vercel Cron / manual triggering
 // (Vercel doesn't run long-lived background intervals, so we expose a trigger endpoint.)
 app.all("/api/internal/jobs/recordings-fetch", async (req: Request, res: Response) => {
@@ -193,28 +192,13 @@ if (!process.env.VERCEL) {
         console.log(`✓ Server is running on port ${PORT}`);
         console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
 
-=======
-if (!process.env.VERCEL) {
-  // Initialize Database and Start Server
-  AppDataSource.initialize()
-    .then(() => {
-      console.log("✓ Database connected successfully");
-
-      app.listen(PORT, () => {
-        console.log(`✓ Server is running on port ${PORT}`);
-        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
-
->>>>>>> 9df40cc0ad4afa28153de6a31fee9b3f1661a104
         // Start background jobs
         RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
         startPayoutJob();
         startBookingCleanupJob();
-<<<<<<< HEAD
-=======
         startReminderJob();
         startParentReportJob();
         startPerformanceAlertJob();
->>>>>>> 9df40cc0ad4afa28153de6a31fee9b3f1661a104
       });
     })
     .catch((error) => {
