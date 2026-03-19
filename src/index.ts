@@ -43,6 +43,25 @@ app.use(cors({
 
 app.use(cookieParser());
 
+// Lazy DB init for serverless environments (e.g. Vercel)
+app.use(async (req: Request, res: Response, next) => {
+  if (!AppDataSource.isInitialized) {
+    try {
+      await AppDataSource.initialize();
+      console.log("✓ Database connected (serverless/lazy init)");
+    } catch (error: any) {
+      console.error("✗ Database connection failed:", error);
+      // Detailed error for debugging deployment issues (Vercel)
+      return res.status(500).json({ 
+        error: "Database connection failed", 
+        message: error?.message || "Unknown error occurred during connection",
+        hint: "Make sure your Vercel Environment Variables are correctly set and DB_SSL is 'true' if using Neon."
+      });
+    }
+  }
+  next();
+});
+
 // Session configuration
 app.use(
   session({
@@ -52,7 +71,9 @@ app.use(
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production", // Use HTTPS in production
-      sameSite: "lax",
+      // Frontend and backend are on different domains after deployment,
+      // so SameSite must be None (with secure=true) in production.
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"), // 24 hours default
     },
   })
@@ -108,25 +129,49 @@ app.use("/api/recordings", recordingRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api", userRoutes);
 
-// Initialize Database and Start Server
-AppDataSource.initialize()
-  .then(() => {
-    console.log("✓ Database connected successfully");
+// Internal endpoint for Vercel Cron / manual triggering
+// (Vercel doesn't run long-lived background intervals, so we expose a trigger endpoint.)
+app.all("/api/internal/jobs/recordings-fetch", async (req: Request, res: Response) => {
+  const secret = process.env.INTERNAL_JOB_SECRET;
+  if (secret) {
+    const providedHeader = req.headers["x-internal-key"];
+    const providedQuery = typeof req.query?.key === "string" ? req.query.key : undefined;
+    const provided = providedHeader || providedQuery;
+    if (provided !== secret) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+  }
 
-    app.listen(PORT, () => {
-      console.log(`✓ Server is running on port ${PORT}`);
-      console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+  try {
+    await RecordingFetchJob.run();
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to run RecordingFetchJob:", error);
+    return res.status(500).json({ error: "Failed to run job" });
+  }
+});
 
-      // Start background jobs
-      RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
-      startPayoutJob();
-      startBookingCleanupJob();
+// Start server + background jobs only outside Vercel serverless
+if (!process.env.VERCEL) {
+  AppDataSource.initialize()
+    .then(() => {
+      console.log("✓ Database connected successfully");
+
+      app.listen(PORT, () => {
+        console.log(`✓ Server is running on port ${PORT}`);
+        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+
+        // Start background jobs
+        RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
+        startPayoutJob();
+        startBookingCleanupJob();
+      });
+    })
+    .catch((error) => {
+      console.error("✗ Database connection failed:", error);
+      process.exit(1);
     });
-  })
-  .catch((error) => {
-    console.error("✗ Database connection failed:", error);
-    process.exit(1);
-  });
+}
 
 export default app;
 
