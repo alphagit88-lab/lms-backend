@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import * as fs from "fs";
 import { AppDataSource } from "../config/data-source";
-import { Content, ContentType } from "../entities/Content";
+import { Content, ContentType, AcademicResourceType } from "../entities/Content";
 import { FileStorageService } from "../services/FileStorageService";
 import { Enrollment } from "../entities/Enrollment";
 import { Payment, PaymentType } from "../entities/Payment";
@@ -52,11 +52,13 @@ export class ContentController {
         title,
         description,
         contentType,
+        resourceType,
         language,
         isPaid,
         price,
         subject,
         grade,
+        topic,
         isDownloadable,
         thumbnailUrl,
         isPublished,
@@ -93,6 +95,13 @@ export class ContentController {
         return res.status(400).json({ error: "Invalid content type" });
       }
 
+      const { AcademicResourceType } = await import("../entities/Content");
+      if (resourceType && !Object.values(AcademicResourceType).includes(resourceType as AcademicResourceType)) {
+        await queryRunner.rollbackTransaction();
+        await queryRunner.release();
+        return res.status(400).json({ error: "Invalid resource type" });
+      }
+
       // Validate price if content is paid
       if (isPaid === "true" || isPaid === true) {
         if (!price) {
@@ -123,6 +132,7 @@ export class ContentController {
         title,
         description: description || null,
         contentType: contentType as ContentType,
+        resourceType: (resourceType as AcademicResourceType) || AcademicResourceType.OTHER,
         language: language || "english",
         fileUrl: fileResult.fileUrl,
         fileSize: fileResult.fileSize,
@@ -131,6 +141,7 @@ export class ContentController {
         price: isPaid === "true" || isPaid === true ? parseFloat(price) : undefined,
         subject: subject || null,
         grade: grade || null,
+        topic: topic || null,
         isDownloadable: isDownloadable !== "false" && isDownloadable !== false,
         // Honour the isPublished flag from the request; default to false so
         // drafts are safe, but allow callers to publish in one step.
@@ -175,6 +186,8 @@ export class ContentController {
         type,
         subject,
         grade,
+        topic,
+        resourceType,
         language,
         isPaid,
         isPublished,
@@ -203,6 +216,14 @@ export class ContentController {
 
       if (grade) {
         queryBuilder.andWhere("content.grade = :grade", { grade });
+      }
+
+      if (topic) {
+        queryBuilder.andWhere("content.topic ILIKE :topic", { topic: `%${topic}%` });
+      }
+
+      if (resourceType) {
+        queryBuilder.andWhere("content.resourceType = :resourceType", { resourceType });
       }
 
       if (language) {
@@ -328,6 +349,8 @@ export class ContentController {
         price,
         subject,
         grade,
+        topic,
+        resourceType,
         isDownloadable,
         isPublished,
         thumbnailUrl,
@@ -339,6 +362,8 @@ export class ContentController {
       if (language !== undefined) content.language = language;
       if (subject !== undefined) content.subject = subject;
       if (grade !== undefined) content.grade = grade;
+      if (topic !== undefined) content.topic = topic;
+      if (resourceType !== undefined) content.resourceType = resourceType as AcademicResourceType;
       if (thumbnailUrl !== undefined) content.thumbnailUrl = thumbnailUrl;
       if (isDownloadable !== undefined)
         content.isDownloadable = isDownloadable === "true" || isDownloadable === true;

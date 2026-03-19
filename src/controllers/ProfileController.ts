@@ -93,6 +93,8 @@ export class ProfileController {
         subjects,
         availabilityTimezone,
         autoConfirmBookings,
+        packageDiscount3Plus,
+        packageDiscount5Plus,
       } = req.body;
 
       const profileRepository = AppDataSource.getRepository(TeacherProfile);
@@ -108,6 +110,8 @@ export class ProfileController {
         if (subjects !== undefined) profile.subjects = subjects;
         if (availabilityTimezone !== undefined) profile.availabilityTimezone = availabilityTimezone;
         if (autoConfirmBookings !== undefined) profile.autoConfirmBookings = autoConfirmBookings;
+        if (packageDiscount3Plus !== undefined) profile.packageDiscount3Plus = packageDiscount3Plus;
+        if (packageDiscount5Plus !== undefined) profile.packageDiscount5Plus = packageDiscount5Plus;
       } else {
         // Create new profile
         profile = profileRepository.create({
@@ -120,6 +124,8 @@ export class ProfileController {
           subjects,
           availabilityTimezone,
           autoConfirmBookings: autoConfirmBookings ?? false,
+          packageDiscount3Plus: packageDiscount3Plus ?? 5.00,
+          packageDiscount5Plus: packageDiscount5Plus ?? 10.00,
         });
       }
 

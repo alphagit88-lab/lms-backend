@@ -73,6 +73,9 @@ export class Course {
   @Column({ type: "decimal", precision: 10, scale: 2, default: 0.00 })
   price!: number;
 
+  @Column({ name: "discount_percentage", type: "decimal", precision: 5, scale: 2, default: 0.00, nullable: true })
+  discountPercentage?: number;
+
   @Column({ name: "is_published", default: false })
   isPublished!: boolean;
 

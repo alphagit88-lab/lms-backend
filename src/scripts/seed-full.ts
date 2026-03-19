@@ -15,7 +15,7 @@ import { Booking, BookingStatus } from "../entities/Booking";
 import { BookingPackage, PackageStatus } from "../entities/BookingPackage";
 import { Session, SessionType, SessionStatus } from "../entities/Session";
 import { Recording } from "../entities/Recording";
-import { Content, ContentType } from "../entities/Content";
+import { Content, ContentType, AcademicResourceType } from "../entities/Content";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { Payment, PaymentStatus, PaymentMethod, PaymentType } from "../entities/Payment";
 import { Payout, PayoutStatus, PayoutMethod } from "../entities/Payout";
@@ -598,13 +598,62 @@ async function seedFull() {
         console.log("\n📖 ACT 5 — Uploading content to the library...\n");
 
         const contents = [
-            contentRepo.create({ teacherId: instructors[0].id, contentType: ContentType.PDF, title: "React Cheat Sheet 2026", description: "A concise 4-page PDF with all React hooks, patterns, and best practices.", language: "English", fileUrl: "https://cdn.lms.com/content/react-cheatsheet-2026.pdf", fileSize: 2500000, isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 234, viewCount: 890, subject: "Web Development", grade: "Undergraduate" }),
-            contentRepo.create({ teacherId: instructors[0].id, contentType: ContentType.VIDEO, title: "Node.js + Docker — Deployment Guide", description: "Step-by-step video on containerizing a Node.js app and deploying to AWS.", language: "English", fileUrl: "https://cdn.lms.com/content/nodejs-docker-guide.mp4", fileSize: 350000000, isPaid: true, price: 9.99, isPublished: true, isDownloadable: false, downloadCount: 0, viewCount: 456, subject: "DevOps", grade: "Professional" }),
-            contentRepo.create({ teacherId: instructors[1].id, contentType: ContentType.PRESENTATION, title: "Design Thinking Workshop Slides", description: "40-slide presentation covering the 5 phases of Design Thinking with real case studies.", language: "English", fileUrl: "https://cdn.lms.com/content/design-thinking-slides.pptx", fileSize: 15000000, isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 167, viewCount: 512, subject: "Design", grade: "Undergraduate" }),
-            contentRepo.create({ teacherId: instructors[1].id, contentType: ContentType.PDF, title: "Figma Shortcuts & Tips", description: "A printable guide of 50+ Figma shortcuts and hidden features.", language: "English", fileUrl: "https://cdn.lms.com/content/figma-shortcuts.pdf", fileSize: 1800000, isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 312, viewCount: 780, subject: "Design Tools", grade: "All Levels" }),
-            contentRepo.create({ teacherId: instructors[2].id, contentType: ContentType.PDF, title: "A/L Combined Maths — 2025 Past Paper (Worked)", description: "Full worked solutions for the 2025 A/L Combined Maths paper.", language: "English", fileUrl: "https://cdn.lms.com/content/al-maths-2025-pastpaper.pdf", fileSize: 8500000, isPaid: true, price: 4.99, isPublished: true, isDownloadable: true, downloadCount: 487, viewCount: 1250, subject: "Mathematics", grade: "A/L" }),
-            contentRepo.create({ teacherId: instructors[2].id, contentType: ContentType.WORKSHEET, title: "O/L Algebra Practice Worksheet", description: "50 problems covering algebraic expressions, equations, and inequalities.", language: "English", fileUrl: "https://cdn.lms.com/content/ol-algebra-worksheet.pdf", fileSize: 950000, isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 189, viewCount: 620, subject: "Mathematics", grade: "Grade 10" }),
-            contentRepo.create({ teacherId: instructors[0].id, contentType: ContentType.VIDEO, title: "TypeScript Generics Explained", description: "A 25-minute deep-dive into TypeScript generics with practical examples.", language: "English", fileUrl: "https://cdn.lms.com/content/ts-generics.mp4", fileSize: 180000000, isPaid: false, isPublished: true, isDownloadable: false, viewCount: 345, subject: "Web Development", grade: "Intermediate" }),
+            contentRepo.create({ 
+                teacherId: instructors[0].id, contentType: ContentType.PDF, resourceType: AcademicResourceType.REFERENCE_MATERIAL,
+                title: "React Cheat Sheet 2026", description: "A concise 4-page PDF with all React hooks, patterns, and best practices.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/react-cheatsheet-2026.pdf", fileSize: 2500000, 
+                isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 234, viewCount: 890, 
+                subject: "Web Development", grade: "Undergraduate", topic: "Hooks & State" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[0].id, contentType: ContentType.VIDEO, resourceType: AcademicResourceType.TUTORIAL,
+                title: "Node.js + Docker — Deployment Guide", description: "Step-by-step video on containerizing a Node.js app and deploying to AWS.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/nodejs-docker-guide.mp4", fileSize: 350000000, 
+                isPaid: true, price: 9.99, isPublished: true, isDownloadable: false, downloadCount: 0, viewCount: 456, 
+                subject: "DevOps", grade: "Professional", topic: "Containerization" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[1].id, contentType: ContentType.PRESENTATION, resourceType: AcademicResourceType.LESSON_NOTES,
+                title: "Design Thinking Workshop Slides", description: "40-slide presentation covering the 5 phases of Design Thinking with real case studies.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/design-thinking-slides.pptx", fileSize: 15000000, 
+                isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 167, viewCount: 512, 
+                subject: "Design", grade: "Undergraduate", topic: "Design Process" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[1].id, contentType: ContentType.PDF, resourceType: AcademicResourceType.REFERENCE_MATERIAL,
+                title: "Figma Shortcuts & Tips", description: "A printable guide of 50+ Figma shortcuts and hidden features.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/figma-shortcuts.pdf", fileSize: 1800000, 
+                isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 312, viewCount: 780, 
+                subject: "Design Tools", grade: "All Levels", topic: "Efficiency" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[2].id, contentType: ContentType.PDF, resourceType: AcademicResourceType.PAST_PAPER,
+                title: "A/L Combined Maths — 2025 Past Paper (Worked)", description: "Full worked solutions for the 2025 A/L Combined Maths paper.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/al-maths-2025-pastpaper.pdf", fileSize: 8500000, 
+                isPaid: true, price: 4.99, isPublished: true, isDownloadable: true, downloadCount: 487, viewCount: 1250, 
+                subject: "Mathematics", grade: "A/L", topic: "Pure Maths & Applied Maths" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[2].id, contentType: ContentType.WORKSHEET, resourceType: AcademicResourceType.REFERENCE_MATERIAL,
+                title: "O/L Algebra Practice Worksheet", description: "50 problems covering algebraic expressions, equations, and inequalities.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/ol-algebra-worksheet.pdf", fileSize: 950000, 
+                isPaid: false, isPublished: true, isDownloadable: true, downloadCount: 189, viewCount: 620, 
+                subject: "Mathematics", grade: "Grade 10", topic: "Algebra" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[0].id, contentType: ContentType.VIDEO, resourceType: AcademicResourceType.TUTORIAL,
+                title: "TypeScript Generics Explained", description: "A 25-minute deep-dive into TypeScript generics with practical examples.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/ts-generics.mp4", fileSize: 180000000, 
+                isPaid: false, isPublished: true, isDownloadable: false, viewCount: 345, 
+                subject: "Web Development", grade: "Intermediate", topic: "Advanced TS" 
+            }),
+            contentRepo.create({ 
+                teacherId: instructors[2].id, contentType: ContentType.PDF, resourceType: AcademicResourceType.MARKING_SCHEME,
+                title: "Combined Maths 2024 Marking Scheme", description: "Official marking criteria and point distribution for the 2024 A/L paper.", 
+                language: "English", fileUrl: "https://cdn.lms.com/content/marked-2024-scheme.pdf", fileSize: 3200000, 
+                isPaid: false, isPublished: true, isDownloadable: true, 
+                subject: "Mathematics", grade: "A/L", topic: "Evaluation" 
+            }),
         ];
         await contentRepo.save(contents);
         console.log(`  📄 Created ${contents.length} content items (PDFs, videos, presentations, worksheets)`);
