@@ -101,21 +101,26 @@ import { getSessionStore } from "./config/session-store";
 // Session configuration
 const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
 
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
-    resave: false,
-    saveUninitialized: false,
-    proxy: true,
-    store: getSessionStore(),
-    cookie: {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "none" : "lax",
-      maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"),
-    },
-  })
-);
+const sessionMiddleware = session({
+  secret: process.env.SESSION_SECRET || "your-secret-key-change-this",
+  resave: false,
+  saveUninitialized: false,
+  proxy: true,
+  store: getSessionStore(),
+  cookie: {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    maxAge: parseInt(process.env.SESSION_MAX_AGE || "86400000"),
+  },
+});
+
+app.use((req: Request, res: Response, next) => {
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+  return sessionMiddleware(req, res, next);
+});
 
 // Request ID middleware (should be early in the chain)
 app.use(requestIdMiddleware);
