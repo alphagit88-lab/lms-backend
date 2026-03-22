@@ -140,7 +140,8 @@ export class AuthController {
         return res.status(401).json({ error: error.message });
       }
       console.error("Login error:", error);
-      res.status(500).json({ error: "Login failed" });
+      // Return detailed error message for debugging purposes
+      res.status(500).json({ error: "Login failed", details: error.message });
     }
   }
 
