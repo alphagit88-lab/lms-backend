@@ -69,6 +69,18 @@ export class AuthController {
       req.session.userEmail = user.email;
       req.session.userRole = user.role;
 
+      // EXPLICIT SAVE: Crucial for serverless environments (Vercel) to ensure session is written before response
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error("Session save error:", err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+
       res.status(201).json({
         message: "Registration successful",
         user,
@@ -103,6 +115,18 @@ export class AuthController {
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       req.session.userRole = user.role;
+
+      // EXPLICIT SAVE: Crucial for serverless environments (Vercel) to ensure session is written before response
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error("Session save error:", err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
 
       res.json({
         message: "Login successful",
