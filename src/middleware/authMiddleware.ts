@@ -54,9 +54,9 @@ export const authorize = (...roles: string[]) => {
       console.warn(`[Authorize] Access denied for user ${req.session.userId} (${req.session.userEmail}). Role in session: '${userRole}'. Required one of: [${roles.join(", ")}]`);
       return res.status(403).json({
         error: "Access denied",
-        message: `[DEBUG_AUTH] This resource requires one of the following roles: ${roles.join(
-          ", "
-        )}`,
+        message: `[DEBUG_AUTH] This resource requires one of the following roles: ${roles.join(", ")}. Your current role is: '${userRole}'. Please contact support or logout and login again.`,
+        requiredRole: roles,
+        yourRole: userRole
       });
     }
 
