@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { AppDataSource } from "../config/data-source";
 import { Course } from "../entities/Course";
 import { User } from "../entities/User";
@@ -525,15 +526,47 @@ export class CourseController {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
+
+      // Log file details for debugging
+      console.log('File upload details:', {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        path: req.file.path,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      });
+
+      // Ensure filename exists. If Multer failed to populate it but file exists on disk, use basename of path.
+      let filename = req.file.filename;
+      if (!filename) {
+        if (req.file.path) {
+          filename = path.basename(req.file.path);
+        } else {
+          // Fallback if no path (e.g. memory storage)
+          const ext = path.extname(req.file.originalname).toLowerCase();
+          filename = `${crypto.randomUUID()}${ext}`;
+        }
+      }
       
       const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
-      let fileUrl = `/uploads/course-media/${req.file.filename}`;
+      let fileUrl = `/uploads/course-media/${filename}`;
       
       if (blobToken) {
         // Upload to Vercel blob using the local file that was saved by diskStorage
         const { put } = require('@vercel/blob');
-        const fileBuffer = fs.readFileSync(req.file.path);
-        const { url } = await put(`uploads/course-media/${req.file.filename}`, fileBuffer, {
+        
+        // If file.path exists content is on disk, otherwise buffer might be in memory (if configuration changed)
+        // Standard setup uses diskStorage so fs.readFileSync is correct
+        let fileBuffer;
+        if (req.file.path && fs.existsSync(req.file.path)) {
+           fileBuffer = fs.readFileSync(req.file.path);
+        } else if (req.file.buffer) {
+           fileBuffer = req.file.buffer;
+        } else {
+           throw new Error("File content not available for upload");
+        }
+
+        const { url } = await put(`uploads/course-media/${filename}`, fileBuffer, {
           access: 'public',
           token: blobToken,
         });
@@ -541,8 +574,13 @@ export class CourseController {
         fileUrl = url;
 
         // Clean up the temporary file from the local/tmp disk since it's uploaded
-        if (fs.existsSync(req.file.path)) {
+        if (req.file.path && fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
+        }
+      } else {
+        // If we are on Vercel but no blob token, warn about ephemeral storage
+        if (process.env.VERCEL) {
+          console.warn("WARNING: Uploading to local ephemeral storage on Vercel. Files will be lost. Configure BLOB_READ_WRITE_TOKEN.");
         }
       }
 

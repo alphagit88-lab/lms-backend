@@ -31,6 +31,9 @@ export enum NotificationType {
   PERFORMANCE_ALERT = "performance_alert",
   PAYMENT_REFUNDED = "payment_refunded",
   GENERAL = "general",
+  PARENT_LINK_REQUEST = "parent_link_request",
+  PARENT_LINK_APPROVED = "parent_link_approved",
+  PARENT_LINK_REJECTED = "parent_link_rejected",
 }
 
 @Entity("notifications")

@@ -3,6 +3,8 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import { User } from "../entities/User";
+import { NotificationService } from "../services/NotificationService";
+import { NotificationType } from "../entities/Notification";
 
 const studentParentRepository = AppDataSource.getRepository(StudentParent);
 const userRepository = AppDataSource.getRepository(User);
@@ -73,8 +75,31 @@ export class ParentController {
 
       await studentParentRepository.save(link);
 
+      // Notify Student
+      await NotificationService.createInApp(
+        student.id,
+        NotificationType.PARENT_LINK_REQUEST,
+        "Parent Link Request",
+        `${parent.firstName} ${parent.lastName} has requested a parent link.`,
+        link.id,
+        process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/profile` : "/profile"
+      );
+
+      // Notify Admins
+      const admins = await userRepository.find({ where: { role: "admin" } });
+      for (const admin of admins) {
+        await NotificationService.createInApp(
+          admin.id,
+          NotificationType.PARENT_LINK_REQUEST,
+          "New Parent Link Request",
+          `Parent ${parent.firstName} ${parent.lastName} wants to link with Student ${student.firstName} ${student.lastName}.`,
+          link.id,
+          "/admin/parent-links"
+        );
+      }
+
       res.status(201).json({
-        message: "Link request sent successfully. Waiting for student approval.",
+        message: "Link request sent successfully. Waiting for admin approval.",
         link: {
           id: link.id,
           parentId: link.parentId,

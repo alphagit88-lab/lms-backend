@@ -10,6 +10,8 @@ import { Payment, PaymentType } from "../entities/Payment";
 import { Enrollment } from "../entities/Enrollment";
 import { StudentParent, LinkStatus } from "../entities/StudentParent";
 import paymentService from "../services/PaymentService";
+import { NotificationService } from "../services/NotificationService";
+import { NotificationType } from "../entities/Notification";
 
 const userRepository = AppDataSource.getRepository(User);
 const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
@@ -169,6 +171,168 @@ export class AdminController {
     } catch (error) {
       console.error("Delete user error:", error);
       res.status(500).json({ error: "Failed to delete user" });
+    }
+  }
+
+  /* ─── Parent Links ─────────────────────────────────── */
+
+  /**
+   * GET /api/admin/parent-links/pending
+   */
+  static async getPendingParentLinks(req: Request, res: Response) {
+    try {
+      const pendingLinks = await studentParentRepository.find({
+        where: { status: LinkStatus.PENDING },
+        relations: ["parent", "student"], // Ensure relations are loaded
+        order: { createdAt: "DESC" },
+      });
+
+      const requests = pendingLinks.map((link) => ({
+        id: link.id,
+        parentId: link.parent.id,
+        studentId: link.student.id,
+        status: link.status,
+        createdAt: link.createdAt,
+        message: link.message,
+        parent: {
+          id: link.parent.id,
+          firstName: link.parent.firstName,
+          lastName: link.parent.lastName,
+          email: link.parent.email,
+        },
+        student: {
+          id: link.student.id,
+          firstName: link.student.firstName,
+          lastName: link.student.lastName,
+          email: link.student.email,
+        }
+      }));
+
+      res.json({ requests });
+    } catch (error) {
+      console.error("Get pending parent links error:", error);
+      res.status(500).json({ error: "Failed to fetch pending parent link requests" });
+    }
+  }
+
+  /**
+   * PATCH /api/admin/parent-links/:id/approve
+   */
+  static async approveParentLink(req: Request, res: Response) {
+    try {
+      const linkId = req.params.id as string;
+      const adminId = req.session.userId!;
+
+      const link = await studentParentRepository.findOne({
+        where: { id: linkId },
+        relations: ["parent", "student"],
+      });
+
+      if (!link) {
+        return res.status(404).json({ error: "Link request not found" });
+      }
+
+      if (link.status === LinkStatus.ACCEPTED) {
+        return res.status(400).json({ error: "Link request already approved" });
+      }
+
+      link.status = LinkStatus.ACCEPTED;
+      link.acceptedAt = new Date();
+
+      await studentParentRepository.save(link);
+
+      // Notify Student
+      await NotificationService.createInApp(
+        link.student.id,
+        NotificationType.PARENT_LINK_APPROVED,
+        "Parent Link Approved",
+        `Your link with parent ${link.parent.firstName} ${link.parent.lastName} has been approved by admin.`,
+        link.id,
+        "/profile"
+      );
+
+      // Notify Parent
+      await NotificationService.createInApp(
+        link.parent.id,
+        NotificationType.PARENT_LINK_APPROVED,
+        "Link Request Approved",
+        `Your request to link with student ${link.student.firstName} ${link.student.lastName} has been approved.`,
+        link.id,
+        "/parent/students"
+      );
+
+      res.json({ 
+        message: "Parent link approved successfully",
+        link: {
+          id: link.id,
+          status: link.status,
+          acceptedAt: link.acceptedAt
+        }
+      });
+    } catch (error) {
+      console.error("Approve parent link error:", error);
+      res.status(500).json({ error: "Failed to approve link request" });
+    }
+  }
+
+  /**
+   * PATCH /api/admin/parent-links/:id/reject
+   */
+  static async rejectParentLink(req: Request, res: Response) {
+    try {
+      const linkId = req.params.id as string;
+      const adminId = req.session.userId!;
+      // Optional: accept a reason in the body
+      const { reason } = req.body;
+
+      const link = await studentParentRepository.findOne({
+        where: { id: linkId },
+        relations: ["parent", "student"],
+      });
+
+      if (!link) {
+        return res.status(404).json({ error: "Link request not found" });
+      }
+
+      if (link.status !== LinkStatus.PENDING) {
+        return res.status(400).json({ error: `Link request is already ${link.status}` });
+      }
+
+      link.status = LinkStatus.REJECTED;
+      // We don't set acceptedAt obviously.
+
+      await studentParentRepository.save(link);
+
+      // Notify Parent
+      await NotificationService.createInApp(
+        link.parent.id,
+        NotificationType.PARENT_LINK_REJECTED,
+        "Link Request Rejected",
+        `Your request to link with student ${link.student.firstName} ${link.student.lastName} was rejected.${reason ? ` Reason: ${reason}` : ""}`,
+        link.id,
+        "/parent/dashboard" 
+      );
+
+      // Notify Student (optional, but good for clarity)
+       await NotificationService.createInApp(
+        link.student.id,
+        NotificationType.PARENT_LINK_REJECTED,
+        "Parent Link Rejected",
+        `The request from ${link.parent.firstName} ${link.parent.lastName} to link with you was rejected by admin.`,
+        link.id,
+        "/profile"
+      );
+
+      res.json({ 
+        message: "Parent link rejected successfully",
+        link: {
+          id: link.id,
+          status: link.status
+        }
+      });
+    } catch (error) {
+      console.error("Reject parent link error:", error);
+      res.status(500).json({ error: "Failed to reject link request" });
     }
   }
 

@@ -50,7 +50,7 @@ export class AuthService {
         lastName: data.lastName,
         role,
         isActive: true,
-        emailVerified: false,
+        emailVerified: true, // Auto-verify new users for now
       });
 
       const savedUser = await queryRunner.manager.save(User, user);
