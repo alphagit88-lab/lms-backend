@@ -754,7 +754,7 @@ class PaymentService {
             .createQueryBuilder("p")
             .leftJoinAndSelect("p.user", "student")
             .where("p.payment_method = :method", { method: PaymentMethod.BANK_TRANSFER })
-            .orderBy("p.created_at", "DESC");
+            .orderBy("p.createdAt", "DESC");
 
         if (params.role !== "admin" && params.instructorId) {
             // Pull courses owned by this instructor
