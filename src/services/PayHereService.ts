@@ -53,24 +53,30 @@ export const PAYHERE_STATUS = {
 } as const;
 
 class PayHereService {
-    private merchantId: string;
-    private merchantSecret: string;
-    private checkoutUrl: string;
+    /**
+     * Use getters for environment variables to ensure they are read AFTER dotenv.config()
+     * and trimmed of any accidental whitespace (very common deployment issue).
+     */
+    private get merchantId(): string {
+        return (process.env.PAYHERE_MERCHANT_ID || "").trim();
+    }
 
-    constructor() {
-        this.merchantId = process.env.PAYHERE_MERCHANT_ID || "";
-        this.merchantSecret = process.env.PAYHERE_MERCHANT_SECRET || "";
+    private get merchantSecret(): string {
+        return (process.env.PAYHERE_MERCHANT_SECRET || "").trim();
+    }
 
-        // Use sandbox for non-production environments
+    private get checkoutUrl(): string {
         const isSandbox = process.env.PAYHERE_SANDBOX !== "false";
-        this.checkoutUrl = isSandbox
+        return isSandbox
             ? "https://sandbox.payhere.lk/pay/checkout"
             : "https://www.payhere.lk/pay/checkout";
+    }
 
+    private validateConfig() {
         if (!this.merchantId || !this.merchantSecret) {
-            console.warn(
-                "[PayHere] PAYHERE_MERCHANT_ID or PAYHERE_MERCHANT_SECRET is not set. " +
-                "Payments will fail. Set these variables in your .env file."
+            throw new Error(
+                "PayHere configuration is missing. Please ensure PAYHERE_MERCHANT_ID and PAYHERE_MERCHANT_SECRET " +
+                "are set correctly in your environment variables (e.g. Vercel dashboard)."
             );
         }
     }
@@ -86,13 +92,14 @@ class PayHereService {
      * Formats amount to 2 decimal places as required by PayHere
      */
     private formatAmount(amount: number): string {
-        return amount.toFixed(2);
+        return Number(amount).toFixed(2);
     }
 
     /**
      * Generates the MD5 hash of the merchant secret (upper-cased)
      */
     private hashSecret(): string {
+        this.validateConfig();
         return crypto
             .createHash("md5")
             .update(this.merchantSecret)
