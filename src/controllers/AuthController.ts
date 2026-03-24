@@ -376,7 +376,9 @@ export class AuthController {
 
       // Delete old profile picture file if it exists
       if (user.profilePicture) {
-        const oldPath = path.join(process.cwd(), user.profilePicture.replace(/^\//, ""));
+        const isVercelContext = !!process.env.VERCEL;
+        const uploadBase = isVercelContext ? "/tmp" : process.cwd();
+        const oldPath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
         if (fs.existsSync(oldPath)) {
           fs.unlinkSync(oldPath);
         }
@@ -419,7 +421,9 @@ export class AuthController {
 
       // Delete the file from disk
       if (user.profilePicture) {
-        const filePath = path.join(process.cwd(), user.profilePicture.replace(/^\//, ""));
+        const isVercelContext = !!process.env.VERCEL;
+        const uploadBase = isVercelContext ? "/tmp" : process.cwd();
+        const filePath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }

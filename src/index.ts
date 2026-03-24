@@ -158,7 +158,10 @@ app.use(handleSessionExpiration);
 app.use("/api", apiRateLimiter);
 
 // Serve static files (uploads)
-const uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
+const isVercel = !!process.env.VERCEL;
+const uploadDir = isVercel 
+  ? "/tmp/uploads" 
+  : (process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads"));
 app.use("/uploads", express.static(uploadDir));
 
 // Data sanitization middleware (removes passwords from responses)
