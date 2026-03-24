@@ -376,16 +376,40 @@ export class AuthController {
 
       // Delete old profile picture file if it exists
       if (user.profilePicture) {
-        const isVercelContext = !!process.env.VERCEL;
-        const uploadBase = isVercelContext ? "/tmp" : process.cwd();
-        const oldPath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
+        const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+        if (blobToken && user.profilePicture.includes('public.blob.vercel-storage.com')) {
+          const { del } = require('@vercel/blob');
+          await del(user.profilePicture, { token: blobToken });
+        } else {
+          const isVercelContext = !!process.env.VERCEL;
+          const uploadBase = isVercelContext ? "/tmp" : process.cwd();
+          const oldPath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
+          if (fs.existsSync(oldPath)) {
+            fs.unlinkSync(oldPath);
+          }
         }
       }
 
-      // Save new path  (e.g. "/uploads/profile-pictures/uuid.jpg")
-      const relativePath = `/uploads/profile-pictures/${req.file.filename}`;
+      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+      let relativePath = `/uploads/profile-pictures/${req.file.filename}`;
+      
+      if (blobToken) {
+        // Upload to Vercel blob using the local file that was saved by diskStorage
+        const { put } = require('@vercel/blob');
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const { url } = await put(`uploads/profile-pictures/${req.file.filename}`, fileBuffer, {
+          access: 'public',
+          token: blobToken,
+        });
+        
+        relativePath = url;
+
+        // Clean up the temporary file from the local/tmp disk since it's uploaded
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+
       user.profilePicture = relativePath;
       await userRepo.save(user);
 
@@ -419,13 +443,19 @@ export class AuthController {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Delete the file from disk
+      // Delete the file from disk or Blob
       if (user.profilePicture) {
-        const isVercelContext = !!process.env.VERCEL;
-        const uploadBase = isVercelContext ? "/tmp" : process.cwd();
-        const filePath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+        if (blobToken && user.profilePicture.includes('public.blob.vercel-storage.com')) {
+          const { del } = require('@vercel/blob');
+          await del(user.profilePicture, { token: blobToken });
+        } else {
+          const isVercelContext = !!process.env.VERCEL;
+          const uploadBase = isVercelContext ? "/tmp" : process.cwd();
+          const filePath = path.join(uploadBase, user.profilePicture.replace(/^\//, ""));
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
         }
       }
 

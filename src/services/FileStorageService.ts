@@ -73,7 +73,7 @@ export class FileStorageService {
   }
 
   /**
-   * Save file to local storage
+   * Save file to storage (Vercel Blob or local)
    */
   async saveFile(
     file: MulterFile,
@@ -83,6 +83,25 @@ export class FileStorageService {
     const fileExtension = path.extname(file.originalname);
     const fileName = `${randomUUID()}${fileExtension}`;
     const contentTypeDir = this.getContentTypeDir(contentType);
+
+    // If Vercel Blob is configured
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+    if (blobToken) {
+      const { put } = require('@vercel/blob');
+      const blobPath = `uploads/${contentTypeDir}/${teacherId}/${fileName}`;
+      const { url } = await put(blobPath, file.buffer, {
+        access: 'public',
+        token: blobToken,
+      });
+      
+      return {
+        fileUrl: url,
+        fileSize: file.size,
+        fileName,
+      };
+    }
+
+    // Local Storage Fallback
     const teacherDir = path.join(this.uploadDir, contentTypeDir, teacherId);
 
     // Ensure teacher directory exists
@@ -112,6 +131,13 @@ export class FileStorageService {
    */
   async deleteFile(fileUrl: string): Promise<void> {
     try {
+      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+      if (blobToken && fileUrl.includes('public.blob.vercel-storage.com')) {
+        const { del } = require('@vercel/blob');
+        await del(fileUrl, { token: blobToken });
+        return;
+      }
+
       // Remove /uploads prefix to get relative path
       const relativePath = fileUrl.replace(/^\/uploads\//, "");
       const filePath = path.join(this.uploadDir, relativePath);
@@ -126,9 +152,10 @@ export class FileStorageService {
   }
 
   /**
-   * Get file path for serving
+   * Get file path for serving (Local only!)
    */
   getFilePath(fileUrl: string): string {
+    if (fileUrl.startsWith('http')) return fileUrl;
     const relativePath = fileUrl.replace(/^\/uploads\//, "");
     return path.join(this.uploadDir, relativePath);
   }
@@ -137,6 +164,8 @@ export class FileStorageService {
    * Check if file exists
    */
   fileExists(fileUrl: string): boolean {
+    if (fileUrl.startsWith('http')) return true; // Assume cloud files exist
+
     try {
       const filePath = this.getFilePath(fileUrl);
       return fs.existsSync(filePath);
