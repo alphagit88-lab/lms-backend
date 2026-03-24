@@ -37,6 +37,9 @@ router.get("/enrollments", AdminController.getEnrollments);
 
 // Parent Management
 router.get("/parent-links", AdminController.getParentLinks);
+router.get("/parent-links/pending", AdminController.getPendingParentLinks);
+router.patch("/parent-links/:id/approve", AdminController.approveParentLink);
+router.patch("/parent-links/:id/reject", AdminController.rejectParentLink);
 router.post("/parent-links", AdminController.createParentLink);
 router.delete("/parent-links/:id", AdminController.removeParentLink);
 

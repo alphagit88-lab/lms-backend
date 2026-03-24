@@ -27,26 +27,26 @@ export const getTeacherStudents = async (req: Request, res: Response): Promise<R
     // Build query for enrollments in teacher's courses
     const qb = enrollmentRepo
       .createQueryBuilder("e")
-      .innerJoin("e.course", "c", "c.instructorId = :teacherId", { teacherId })
+      .innerJoin("e.course", "c", "c.instructor_id = :teacherId", { teacherId })
       .innerJoin("e.student", "s")
       .leftJoin("e.lessonProgress", "lp")
       .leftJoin("lp.lesson", "l")
       .select([
         "e.id AS enrollmentId",
-        "e.studentId AS studentId",
+        "e.student_id AS studentId",
         "s.firstName AS firstName",
         "s.lastName AS lastName",
         "s.email AS email",
         "c.id AS courseId",
         "c.title AS courseTitle",
         "e.progressPercentage AS progress",
-        "e.lastAccessedAt AS lastActive",
+        "e.last_accessed_at AS lastActive",
         "e.status AS enrollmentStatus",
-        "e.enrolledAt AS enrolledAt",
+        "e.enrolled_at AS enrolledAt",
         "COUNT(DISTINCT l.id) AS totalLessons",
-        "COUNT(DISTINCT CASE WHEN lp.isCompleted = true THEN lp.id END) AS completedLessons",
+        "COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.id END) AS completedLessons",
       ])
-      .groupBy("e.id, e.studentId, s.firstName, s.lastName, s.email, c.id, c.title, e.progressPercentage, e.lastAccessedAt, e.status, e.enrolledAt");
+      .groupBy("e.id, e.student_id, s.firstName, s.lastName, s.email, c.id, c.title, e.progress_percentage, e.last_accessed_at, e.status, e.enrolled_at");
 
     if (courseId) {
       qb.andWhere("c.id = :courseId", { courseId });
@@ -62,11 +62,11 @@ export const getTeacherStudents = async (req: Request, res: Response): Promise<R
         // Get master submissions (questionId IS NULL) that are graded, for exams in this course
         const scoreRow = await submissionRepo
           .createQueryBuilder("sub")
-          .innerJoin("sub.exam", "exam", "exam.courseId = :courseId", { courseId: enr.courseId })
-          .select("AVG(sub.marksAwarded / exam.totalMarks * 100)", "avgScore")
+          .innerJoin("sub.exam", "exam", "exam.course_id = :courseId", { courseId: enr.courseId })
+          .select("AVG(sub.marks_awarded / exam.total_marks * 100)", "avgScore")
           .addSelect("COUNT(sub.id)", "examCount")
-          .where("sub.studentId = :studentId", { studentId: enr.studentId })
-          .andWhere("sub.questionId IS NULL")
+          .where("sub.student_id = :studentId", { studentId: enr.studentId })
+          .andWhere("sub.question_id IS NULL")
           .andWhere("sub.status IN (:...statuses)", { statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED] })
           .getRawOne();
 
@@ -112,25 +112,25 @@ export const getStudentExams = async (req: Request, res: Response): Promise<Resp
       .leftJoin("exam.course", "course")
       .select([
         "sub.id AS submissionId",
-        "sub.examId AS examId",
+        "sub.exam_id AS examId",
         "exam.title AS examTitle",
-        "exam.examType AS examType",
-        "exam.totalMarks AS totalMarks",
-        "exam.passingMarks AS passingMarks",
-        "sub.marksAwarded AS marksAwarded",
-        "sub.submittedAt AS submittedAt",
-        "sub.gradedAt AS gradedAt",
-        "sub.timeSpentMinutes AS timeSpentMinutes",
-        "sub.attemptNumber AS attemptNumber",
+        "exam.exam_type AS examType",
+        "exam.total_marks AS totalMarks",
+        "exam.passing_marks AS passingMarks",
+        "sub.marks_awarded AS marksAwarded",
+        "sub.submitted_at AS submittedAt",
+        "sub.graded_at AS gradedAt",
+        "sub.time_spent_minutes AS timeSpentMinutes",
+        "sub.attempt_number AS attemptNumber",
         "course.title AS courseTitle",
         "course.id AS courseId",
       ])
-      .where("sub.studentId = :studentId", { studentId })
-      .andWhere("sub.questionId IS NULL")
+      .where("sub.student_id = :studentId", { studentId })
+      .andWhere("sub.question_id IS NULL")
       .andWhere("sub.status IN (:...statuses)", {
         statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED],
       })
-      .orderBy("sub.submittedAt", "DESC")
+      .orderBy("sub.submitted_at", "DESC")
       .getRawMany();
 
     const exams = submissions.map((s) => {
@@ -192,7 +192,7 @@ export const getTeacherAttendance = async (req: Request, res: Response): Promise
       .createQueryBuilder("b")
       .innerJoin("b.student", "s")
       .select([
-        "b.studentId AS studentId",
+        "b.student_id AS studentId",
         "s.firstName AS firstName",
         "s.lastName AS lastName",
         "s.email AS email",
@@ -200,20 +200,20 @@ export const getTeacherAttendance = async (req: Request, res: Response): Promise
         "COUNT(CASE WHEN b.status = :noShow THEN 1 END) AS noShows",
         "COUNT(b.id) AS totalScheduled",
       ])
-      .where("b.teacherId = :teacherId", { teacherId })
+      .where("b.teacher_id = :teacherId", { teacherId })
       .andWhere("b.status IN (:...statuses)", {
         statuses: [BookingStatus.COMPLETED, BookingStatus.NO_SHOW],
       })
       .setParameter("completed", BookingStatus.COMPLETED)
       .setParameter("noShow", BookingStatus.NO_SHOW)
-      .groupBy("b.studentId, s.firstName, s.lastName, s.email")
+      .groupBy("b.student_id, s.firstName, s.lastName, s.email")
       .orderBy("sessionsAttended", "DESC");
 
     // If courseId provided, filter bookings bound to sessions in that course class
     // (Booking → Session → Class → Course). If no such link, return all teacher bookings.
     if (courseId) {
-      qb.innerJoin(Session, "sess", "sess.bookingId = b.id")
-        .innerJoin("sess.class", "cls", "cls.courseId = :courseId", { courseId });
+      qb.innerJoin(Session, "sess", "sess.booking_id = b.id")
+        .innerJoin("sess.class", "cls", "cls.course_id = :courseId", { courseId });
     }
 
     const rows = await qb.getRawMany();
@@ -266,24 +266,24 @@ export const getStudentTimeline = async (req: Request, res: Response): Promise<R
       enrollmentRepo
         .createQueryBuilder("e")
         .innerJoin("e.course", "c")
-        .select(["e.enrolledAt AS eventDate", "c.title AS title", "c.id AS referenceId", "e.status AS status"])
-        .where("e.studentId = :studentId", { studentId })
+        .select(["e.enrolled_at AS eventDate", "c.title AS title", "c.id AS referenceId", "e.status AS status"])
+        .where("e.student_id = :studentId", { studentId })
         .getRawMany(),
 
       // Lesson completion events
       lpRepo
         .createQueryBuilder("lp")
-        .innerJoin("lp.enrollment", "e", "e.studentId = :studentId", { studentId })
+        .innerJoin("lp.enrollment", "e", "e.student_id = :studentId", { studentId })
         .innerJoin("lp.lesson", "l")
         .innerJoin("l.course", "c")
         .select([
-          "lp.completedAt AS eventDate",
+          "lp.completed_at AS eventDate",
           "l.title AS title",
           "l.id AS referenceId",
           "c.title AS courseTitle",
         ])
-        .where("lp.isCompleted = true")
-        .andWhere("lp.completedAt IS NOT NULL")
+        .where("lp.is_completed = true")
+        .andWhere("lp.completed_at IS NOT NULL")
         .getRawMany(),
 
       // Exam graded events (master only)
@@ -292,19 +292,19 @@ export const getStudentTimeline = async (req: Request, res: Response): Promise<R
         .innerJoin("sub.exam", "exam")
         .leftJoin("exam.course", "c")
         .select([
-          "sub.gradedAt AS eventDate",
+          "sub.graded_at AS eventDate",
           "exam.title AS title",
           "sub.id AS referenceId",
           "sub.marksAwarded AS marksAwarded",
           "exam.totalMarks AS totalMarks",
           "c.title AS courseTitle",
         ])
-        .where("sub.studentId = :studentId", { studentId })
-        .andWhere("sub.questionId IS NULL")
+        .where("sub.student_id = :studentId", { studentId })
+        .andWhere("sub.question_id IS NULL")
         .andWhere("sub.status IN (:...statuses)", {
           statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED],
         })
-        .andWhere("sub.gradedAt IS NOT NULL")
+        .andWhere("sub.graded_at IS NOT NULL")
         .getRawMany(),
     ]);
 
@@ -380,25 +380,25 @@ export const getTeacherSummary = async (req: Request, res: Response): Promise<Re
       // All-time net earnings (amount - platformFee)
       paymentRepo
         .createQueryBuilder("p")
-        .select("SUM(p.amount - COALESCE(p.platformFee, 0))", "totalEarnings")
-        .where("p.recipientId = :teacherId", { teacherId })
+        .select('SUM(p.amount - COALESCE(p."platformFee", 0))', "totalEarnings")
+        .where("p.recipient_id = :teacherId", { teacherId })
         .andWhere("p.paymentStatus = :status", { status: PaymentStatus.COMPLETED })
         .getRawOne(),
 
       // This month earnings
       paymentRepo
         .createQueryBuilder("p")
-        .select("SUM(p.amount - COALESCE(p.platformFee, 0))", "monthEarnings")
-        .where("p.recipientId = :teacherId", { teacherId })
+        .select('SUM(p.amount - COALESCE(p."platformFee", 0))', "monthEarnings")
+        .where("p.recipient_id = :teacherId", { teacherId })
         .andWhere("p.paymentStatus = :status", { status: PaymentStatus.COMPLETED })
-        .andWhere("p.paymentDate >= :monthStart", { monthStart })
+        .andWhere("p.payment_date >= :monthStart", { monthStart })
         .getRawOne(),
 
       // Pending payouts
       payoutRepo
         .createQueryBuilder("pay")
         .select("SUM(pay.amount)", "pendingAmount")
-        .where("pay.teacherId = :teacherId", { teacherId })
+        .where("pay.teacher_id = :teacherId", { teacherId })
         .andWhere("pay.status = :status", { status: PayoutStatus.PENDING })
         .getRawOne(),
 
@@ -408,8 +408,8 @@ export const getTeacherSummary = async (req: Request, res: Response): Promise<Re
       // Active students (enrollments in teacher's courses that are active)
       enrollmentRepo
         .createQueryBuilder("e")
-        .innerJoin("e.course", "c", "c.instructorId = :teacherId", { teacherId })
-        .select("COUNT(DISTINCT e.studentId)", "activeStudents")
+        .innerJoin("e.course", "c", "c.instructor_id = :teacherId", { teacherId })
+        .select("COUNT(DISTINCT e.student_id)", "activeStudents")
         .where("e.status = 'active'")
         .getRawOne(),
     ]);
@@ -443,20 +443,20 @@ export const getTeacherEarnings = async (req: Request, res: Response): Promise<R
     let groupExpr: string;
     let labelExpr: string;
     if (period === "weekly") {
-      groupExpr = "TO_CHAR(DATE_TRUNC('week', p.paymentDate), 'IYYY-IW')";
-      labelExpr = "CONCAT('Week ', TO_CHAR(p.paymentDate, 'IW'), ' ', TO_CHAR(p.paymentDate, 'IYYY'))";
+      groupExpr = "TO_CHAR(DATE_TRUNC('week', p.payment_date), 'IYYY-IW')";
+      labelExpr = "CONCAT('Week ', TO_CHAR(p.payment_date, 'IW'), ' ', TO_CHAR(p.payment_date, 'IYYY'))";
     } else {
-      groupExpr = "TO_CHAR(p.paymentDate, 'YYYY-MM')";
-      labelExpr = "TO_CHAR(p.paymentDate, 'Mon YYYY')";
+      groupExpr = "TO_CHAR(p.payment_date, 'YYYY-MM')";
+      labelExpr = "TO_CHAR(p.payment_date, 'Mon YYYY')";
     }
 
     const rows = await paymentRepo
       .createQueryBuilder("p")
       .select(labelExpr, "label")
       .addSelect(groupExpr, "period")
-      .addSelect("SUM(p.amount - COALESCE(p.platformFee, 0))", "earnings")
+      .addSelect('SUM(p.amount - COALESCE(p."platformFee", 0))', "earnings")
       .addSelect("COUNT(p.id)", "transactions")
-      .where("p.recipientId = :teacherId", { teacherId })
+      .where("p.recipient_id = :teacherId", { teacherId })
       .andWhere("p.paymentStatus = :status", { status: PaymentStatus.COMPLETED })
       .groupBy(groupExpr)
       .addGroupBy(labelExpr)
@@ -510,7 +510,7 @@ export const getCoursePerformance = async (req: Request, res: Response): Promise
           "COUNT(CASE WHEN e.status = 'completed' THEN 1 END) AS completed",
           "COUNT(CASE WHEN e.status = 'active' THEN 1 END) AS active",
         ])
-        .where("e.courseId = :courseId", { courseId })
+        .where("e.course_id = :courseId", { courseId })
         .getRawOne(),
 
       // Lesson engagement
@@ -520,28 +520,28 @@ export const getCoursePerformance = async (req: Request, res: Response): Promise
         .select([
           "l.id AS lessonId",
           "l.title AS lessonTitle",
-          "l.sortOrder AS sortOrder",
+          "l.sort_order AS sortOrder",
           "COUNT(DISTINCT lp.enrollment_id) AS studentsStarted",
           "COUNT(DISTINCT CASE WHEN lp.is_completed = true THEN lp.enrollment_id END) AS studentsCompleted",
         ])
-        .where("l.courseId = :courseId", { courseId })
-        .groupBy("l.id, l.title, l.sortOrder")
-        .orderBy("l.sortOrder", "ASC")
+        .where("l.course_id = :courseId", { courseId })
+        .groupBy("l.id, l.title, l.sort_order")
+        .orderBy("l.sort_order", "ASC")
         .getRawMany(),
 
       // Exam scores per student (master submissions only)
       submissionRepo
         .createQueryBuilder("sub")
-        .innerJoin("sub.exam", "exam", "exam.courseId = :courseId", { courseId })
+        .innerJoin("sub.exam", "exam", "exam.course_id = :courseId", { courseId })
         .innerJoin("sub.student", "s")
         .select([
-          "sub.studentId AS studentId",
+          "sub.student_id AS studentId",
           "s.firstName AS firstName",
           "s.lastName AS lastName",
-          "AVG(sub.marksAwarded / exam.totalMarks * 100) AS avgScore",
+          "AVG(sub.marks_awarded / exam.total_marks * 100) AS avgScore",
           "COUNT(sub.id) AS examsTaken",
         ])
-        .where("sub.questionId IS NULL")
+        .where("sub.question_id IS NULL")
         .andWhere("sub.status IN (:...statuses)", {
           statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED],
         })
@@ -624,7 +624,7 @@ export const getAdminSummary = async (req: Request, res: Response): Promise<Resp
           .createQueryBuilder("u")
           .select("u.role AS role")
           .addSelect("COUNT(u.id)", "count")
-          .where("u.isActive = true")
+          .where("u.is_active = true")
           .groupBy("u.role")
           .getRawMany(),
 
@@ -641,8 +641,8 @@ export const getAdminSummary = async (req: Request, res: Response): Promise<Resp
           .createQueryBuilder("p")
           .select([
             "SUM(p.amount) AS totalRevenue",
-            "SUM(COALESCE(p.platformFee, 0)) AS totalCommission",
-            "SUM(COALESCE(p.refundAmount, 0)) AS totalRefunds",
+            'SUM(COALESCE(p."platformFee", 0)) AS totalCommission',
+            'SUM(COALESCE(p."refundAmount", 0)) AS totalRefunds',
           ])
           .where("p.paymentStatus = :status", { status: PaymentStatus.COMPLETED })
           .getRawOne(),
@@ -651,7 +651,7 @@ export const getAdminSummary = async (req: Request, res: Response): Promise<Resp
         sessionRepo
           .createQueryBuilder("s")
           .select("COUNT(s.id)", "count")
-          .where("s.startTime >= :todayStart", { todayStart })
+          .where("s.session_start_time >= :todayStart", { todayStart })
           .andWhere("s.status = :status", { status: SessionStatus.IN_PROGRESS })
           .getRawOne(),
 
@@ -659,7 +659,7 @@ export const getAdminSummary = async (req: Request, res: Response): Promise<Resp
         userRepo
           .createQueryBuilder("u")
           .select("COUNT(u.id)", "count")
-          .where("u.createdAt >= :monthStart", {
+          .where("u.created_at >= :monthStart", {
             monthStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
           })
           .getRawOne(),
@@ -706,11 +706,11 @@ export const getAdminRevenue = async (req: Request, res: Response): Promise<Resp
     let groupExpr: string;
     let labelExpr: string;
     if (period === "weekly") {
-      groupExpr = "TO_CHAR(DATE_TRUNC('week', p.paymentDate), 'IYYY-IW')";
-      labelExpr = "CONCAT('Week ', TO_CHAR(p.paymentDate, 'IW'), ' ', TO_CHAR(p.paymentDate, 'IYYY'))";
+      groupExpr = "TO_CHAR(DATE_TRUNC('week', p.payment_date), 'IYYY-IW')";
+      labelExpr = "CONCAT('Week ', TO_CHAR(p.payment_date, 'IW'), ' ', TO_CHAR(p.payment_date, 'IYYY'))";
     } else {
-      groupExpr = "TO_CHAR(p.paymentDate, 'YYYY-MM')";
-      labelExpr = "TO_CHAR(p.paymentDate, 'Mon YYYY')";
+      groupExpr = "TO_CHAR(p.payment_date, 'YYYY-MM')";
+      labelExpr = "TO_CHAR(p.payment_date, 'Mon YYYY')";
     }
 
     const [revenueRows, payoutRows] = await Promise.all([
@@ -719,8 +719,8 @@ export const getAdminRevenue = async (req: Request, res: Response): Promise<Resp
         .select(labelExpr, "label")
         .addSelect(groupExpr, "period")
         .addSelect("SUM(p.amount)", "grossRevenue")
-        .addSelect("SUM(COALESCE(p.platformFee, 0))", "commission")
-        .addSelect("SUM(COALESCE(p.refundAmount, 0))", "refunds")
+        .addSelect('SUM(COALESCE(p."platformFee", 0))', "commission")
+        .addSelect('SUM(COALESCE(p."refundAmount", 0))', "refunds")
         .where("p.paymentStatus = :status", { status: PaymentStatus.COMPLETED })
         .groupBy(groupExpr)
         .addGroupBy(labelExpr)
@@ -730,14 +730,14 @@ export const getAdminRevenue = async (req: Request, res: Response): Promise<Resp
 
       payoutRepo
         .createQueryBuilder("pay")
-        .select("TO_CHAR(pay.periodEnd, 'YYYY-MM')", "period")
+        .select("TO_CHAR(pay.period_end, 'YYYY-MM')", "period")
         .addSelect("SUM(pay.amount)", "payouts")
         .where("pay.status IN (:...statuses)", {
           statuses: [PayoutStatus.COMPLETED, PayoutStatus.PROCESSING],
         })
-        .andWhere("pay.periodEnd IS NOT NULL")
-        .groupBy("TO_CHAR(pay.periodEnd, 'YYYY-MM')")
-        .orderBy("TO_CHAR(pay.periodEnd, 'YYYY-MM')", "ASC")
+        .andWhere("pay.period_end IS NOT NULL")
+        .groupBy("TO_CHAR(pay.period_end, 'YYYY-MM')")
+        .orderBy("TO_CHAR(pay.period_end, 'YYYY-MM')", "ASC")
         .limit(12)
         .getRawMany(),
     ]);
@@ -805,7 +805,7 @@ export const getAdminTeachers = async (req: Request, res: Response): Promise<Res
           qb
             .from(Payment, "p")
             .select("p.recipient_id", "recipient_id")
-            .addSelect("SUM(p.amount - COALESCE(p.platform_fee, 0))", "total_earnings")
+            .addSelect('SUM(p.amount - COALESCE(p."platformFee", 0))', "total_earnings")
             .where("p.payment_status = :pStatus", { pStatus: PaymentStatus.COMPLETED })
             .groupBy("p.recipient_id"),
         "ec",

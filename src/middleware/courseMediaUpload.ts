@@ -9,12 +9,12 @@ const COURSE_MEDIA_DIR = isVercel
     ? "/tmp/uploads/course-media"
     : path.join(process.cwd(), "uploads", "course-media");
 
-if (!isVercel) {
-    try {
-        if (!fs.existsSync(COURSE_MEDIA_DIR)) {
-            fs.mkdirSync(COURSE_MEDIA_DIR, { recursive: true });
-        }
-    } catch { /* ignore on serverless */ }
+try {
+    if (!fs.existsSync(COURSE_MEDIA_DIR)) {
+        fs.mkdirSync(COURSE_MEDIA_DIR, { recursive: true });
+    }
+} catch {
+    // ignore directory creation errors on serverless if any
 }
 
 // Allowed file types (Images for thumbnail, Videos for preview)
@@ -22,18 +22,16 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "vi
 const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm"];
 const MAX_SIZE = 100 * 1024 * 1024; // 100MB
 
-const storage = isVercel
-    ? multer.memoryStorage()
-    : multer.diskStorage({
-        destination: (_req, _file, cb) => {
-            cb(null, COURSE_MEDIA_DIR);
-        },
-        filename: (_req, file, cb) => {
-            const ext = path.extname(file.originalname).toLowerCase();
-            const uniqueName = `${crypto.randomUUID()}${ext}`;
-            cb(null, uniqueName);
-        },
-    });
+const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => {
+        cb(null, COURSE_MEDIA_DIR);
+    },
+    filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const uniqueName = `${crypto.randomUUID()}${ext}`;
+        cb(null, uniqueName);
+    },
+});
 
 const fileFilter = (
     _req: Express.Request,
