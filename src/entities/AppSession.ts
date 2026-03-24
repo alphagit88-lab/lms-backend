@@ -1,5 +1,5 @@
 import { ISession } from "connect-typeorm";
-import { Column, Entity, Index, PrimaryColumn } from "typeorm";
+import { Column, DeleteDateColumn, Entity, Index, PrimaryColumn } from "typeorm";
 
 @Entity("app_sessions")
 export class AppSession implements ISession {
@@ -12,4 +12,7 @@ export class AppSession implements ISession {
 
     @Column("text")
     public json = "";
+
+    @DeleteDateColumn()
+    public destroyedAt?: Date;
 }

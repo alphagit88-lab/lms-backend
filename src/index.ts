@@ -73,6 +73,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // 2. Lazy DB init for serverless environments (e.g. Vercel)
+let dbMigrated = false;
 app.use(async (req: Request, res: Response, next) => {
   // CRITICAL: Preflight requests (OPTIONS) MUST skip the database connection
   // Otherwise, the browser hangs forever while the database tries to wake up.
@@ -93,6 +94,28 @@ app.use(async (req: Request, res: Response, next) => {
       });
     }
   }
+
+  // One-time migration: ensure `destroyedAt` column exists on app_sessions
+  // (Required by connect-typeorm v2 for soft-delete; without it, logout fails
+  //  silently and subsequent logins crash with duplicate key errors.)
+  if (!dbMigrated) {
+    dbMigrated = true; // set early to prevent concurrent migrations
+    try {
+      const cols = await AppDataSource.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'app_sessions' AND column_name = 'destroyedAt'`
+      );
+      if (cols.length === 0) {
+        await AppDataSource.query(`ALTER TABLE "app_sessions" ADD COLUMN "destroyedAt" TIMESTAMP`);
+        // Purge all existing sessions since they lack the destroyedAt column
+        // and may cause duplicate key errors
+        await AppDataSource.query(`DELETE FROM "app_sessions"`);
+        console.log("✓ Added missing destroyedAt column to app_sessions and purged stale sessions");
+      }
+    } catch (migErr) {
+      console.warn("Session migration check failed (non-fatal):", migErr);
+    }
+  }
+
   next();
 });
 
