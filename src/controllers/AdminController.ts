@@ -47,7 +47,7 @@ export class AdminController {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       const recentSignups = await userRepository
         .createQueryBuilder("u")
-        .where("u.created_at >= :since", { since: sevenDaysAgo })
+        .where("u.createdAt >= :since", { since: sevenDaysAgo })
         .getCount();
 
       res.json({
@@ -97,7 +97,7 @@ export class AdminController {
       const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
       const pageSize = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 20));
 
-      qb.orderBy("u.created_at", "DESC")
+      qb.orderBy("u.createdAt", "DESC")
         .skip((pageNum - 1) * pageSize)
         .take(pageSize);
 

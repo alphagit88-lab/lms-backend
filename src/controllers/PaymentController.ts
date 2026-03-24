@@ -168,6 +168,9 @@ export class PaymentController {
      */
     async createIntent(req: Request, res: Response) {
         try {
+            if (req.session.userRole === "admin") {
+                return res.status(403).json({ error: "Admins cannot make payments." });
+            }
             const {
                 type,
                 referenceId,
@@ -230,6 +233,9 @@ export class PaymentController {
      */
     async createBulkIntent(req: Request, res: Response) {
         try {
+            if (req.session.userRole === "admin") {
+                return res.status(403).json({ error: "Admins cannot make payments." });
+            }
             const { courseIds, currency = "LKR", firstName, lastName, email, phone } = req.body;
 
             if (!Array.isArray(courseIds) || courseIds.length === 0) {
@@ -398,6 +404,9 @@ export class PaymentController {
     /** POST /api/payments/bank-transfer/create-intent */
     async createBankTransferIntent(req: Request, res: Response) {
         try {
+            if (req.session.userRole === "admin") {
+                return res.status(403).json({ error: "Admins cannot make payments." });
+            }
             const { type, referenceId, amount, currency = "LKR", recipientId } = req.body;
             if (!type || !referenceId || amount === undefined || amount === null) {
                 return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
@@ -419,6 +428,9 @@ export class PaymentController {
     /** POST /api/payments/bank-transfer/create-bulk-intent */
     async createBulkBankTransferIntent(req: Request, res: Response) {
         try {
+            if (req.session.userRole === "admin") {
+                return res.status(403).json({ error: "Admins cannot make payments." });
+            }
             const { courseIds, currency = "LKR" } = req.body;
             if (!Array.isArray(courseIds) || courseIds.length === 0) {
                 return res.status(400).json({ error: "courseIds must be a non-empty array." });
