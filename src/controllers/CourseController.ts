@@ -525,8 +525,27 @@ export class CourseController {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      // The file was saved successfully by multer. We return the URL.
-      const fileUrl = `/uploads/course-media/${req.file.filename}`;
+      
+      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+      let fileUrl = `/uploads/course-media/${req.file.filename}`;
+      
+      if (blobToken) {
+        // Upload to Vercel blob using the local file that was saved by diskStorage
+        const { put } = require('@vercel/blob');
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const { url } = await put(`uploads/course-media/${req.file.filename}`, fileBuffer, {
+          access: 'public',
+          token: blobToken,
+        });
+        
+        fileUrl = url;
+
+        // Clean up the temporary file from the local/tmp disk since it's uploaded
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+
       res.json({ message: "File uploaded successfully", url: fileUrl });
     } catch (error) {
       console.error("Upload course media error:", error);
@@ -545,6 +564,13 @@ export class CourseController {
         return res.status(400).json({ error: "No URL provided" });
       }
 
+      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+      if (blobToken && url.includes('public.blob.vercel-storage.com')) {
+        const { del } = require('@vercel/blob');
+        await del(url, { token: blobToken });
+        return res.json({ message: "Media removed successfully from cloud storage" });
+      }
+
       // Check if it's a local file and starts with the upload prefix
       // We check for the filename only to be safe
       if (url.includes("/uploads/course-media/")) {
@@ -553,7 +579,10 @@ export class CourseController {
         
         // Basic security check: ensure it's just a filename, no path traversal
         if (filename && !filename.includes("..")) {
-          const filePath = path.join(process.cwd(), "uploads", "course-media", filename);
+          const isVercelContext = !!process.env.VERCEL;
+          const uploadBase = isVercelContext ? "/tmp" : process.cwd();
+          const filePath = path.join(uploadBase, "uploads", "course-media", filename);
+          
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
           }
