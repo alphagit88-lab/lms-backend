@@ -9,6 +9,7 @@ import {
   Index,
 } from "typeorm";
 import { User } from "./User";
+import { Course } from "./Course";
 
 export enum ContentType {
   PDF = "pdf",
@@ -45,6 +46,13 @@ export class Content {
 
   @Column({ name: "teacher_id" })
   teacherId!: string;
+
+  @Column({ name: "course_id", nullable: true })
+  courseId?: string;
+
+  @ManyToOne(() => Course, (course) => course.contents, { nullable: true })
+  @JoinColumn({ name: "course_id" })
+  course?: Course;
 
   @Column({
     name: "content_type",

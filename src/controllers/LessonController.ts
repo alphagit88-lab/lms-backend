@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { Lesson } from "../entities/Lesson";
 import { Course } from "../entities/Course";
+import fs from "fs";
+import path from "path";
 
 const lessonRepository = AppDataSource.getRepository(Lesson);
 const courseRepository = AppDataSource.getRepository(Course);
@@ -138,11 +140,17 @@ export class LessonController {
         title,
         slug,
         content,
-        videoUrl,
+        videoUrl, // From body (URL input)
         durationMinutes,
         sortOrder,
         isPreview,
       } = req.body;
+
+      // Determine video URL source
+      let finalVideoUrl = videoUrl;
+      if (req.file) {
+        finalVideoUrl = `/uploads/course-media/${req.file.filename}`;
+      }
 
       // Ensure param is string
       if (Array.isArray(courseId)) {
@@ -199,10 +207,10 @@ export class LessonController {
         title,
         slug,
         content,
-        videoUrl,
-        durationMinutes: durationMinutes || 0,
-        sortOrder: finalSortOrder,
-        isPreview: isPreview || false,
+        videoUrl: finalVideoUrl,
+        durationMinutes: Number(durationMinutes) || 0,
+        sortOrder: Number(finalSortOrder),
+        isPreview: String(isPreview) === "true" || isPreview === true,
         isPublished: false,
       });
 
@@ -214,7 +222,10 @@ export class LessonController {
       });
     } catch (error) {
       console.error("Create lesson error:", error);
-      res.status(500).json({ error: "Failed to create lesson" });
+      res.status(500).json({ 
+        error: "Failed to create lesson",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -237,6 +248,12 @@ export class LessonController {
         isPreview,
         isPublished,
       } = req.body;
+
+      // Determine video URL source
+      let finalVideoUrl = videoUrl;
+      if (req.file) {
+        finalVideoUrl = `/uploads/course-media/${req.file.filename}`;
+      }
 
       // Ensure param is string
       if (Array.isArray(id)) {
@@ -279,12 +296,11 @@ export class LessonController {
       if (title !== undefined) lesson.title = title;
       if (slug !== undefined) lesson.slug = slug;
       if (content !== undefined) lesson.content = content;
-      if (videoUrl !== undefined) lesson.videoUrl = videoUrl;
-      if (durationMinutes !== undefined)
-        lesson.durationMinutes = durationMinutes;
-      if (sortOrder !== undefined) lesson.sortOrder = sortOrder;
-      if (isPreview !== undefined) lesson.isPreview = isPreview;
-      if (isPublished !== undefined) lesson.isPublished = isPublished;
+      if (finalVideoUrl !== undefined) lesson.videoUrl = finalVideoUrl;
+      if (durationMinutes !== undefined) lesson.durationMinutes = Number(durationMinutes) || 0;
+      if (sortOrder !== undefined) lesson.sortOrder = Number(sortOrder) || 0;
+      if (isPreview !== undefined) lesson.isPreview = String(isPreview) === "true" || isPreview === true;
+      if (isPublished !== undefined) lesson.isPublished = String(isPublished) === "true" || isPublished === true;
 
       await lessonRepository.save(lesson);
 
@@ -315,7 +331,7 @@ export class LessonController {
 
       const lesson = await lessonRepository.findOne({
         where: { id: id as string },
-        relations: ["course", "lessonProgress"],
+        relations: ["course"],
       });
 
       if (!lesson) {
@@ -333,6 +349,14 @@ export class LessonController {
       }
 
       await lessonRepository.remove(lesson);
+
+      // Attempt to delete associated video file if it's local
+      if (lesson.videoUrl && lesson.videoUrl.startsWith("/uploads")) {
+        const filePath = path.join(process.cwd(), lesson.videoUrl);
+        fs.unlink(filePath, (err) => {
+          if (err) console.error(`[LessonController] Failed to delete file ${filePath}:`, err);
+        });
+      }
 
       res.json({ message: "Lesson deleted successfully" });
     } catch (error) {

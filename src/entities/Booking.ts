@@ -73,6 +73,9 @@ export class Booking {
   @Column({ name: "meeting_link", length: 500, nullable: true })
   meetingLink?: string;
 
+  @Column({ name: "meeting_start_link", length: 1000, nullable: true })
+  meetingStartLink?: string;
+
   @Column({ name: "meeting_id", length: 255, nullable: true })
   meetingId?: string;
 

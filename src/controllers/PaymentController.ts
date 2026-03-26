@@ -7,6 +7,9 @@ import { Payment, PaymentStatus, PaymentType } from "../entities/Payment";
 import { TransactionType } from "../entities/Transaction";
 import { NotificationService } from "../services/NotificationService";
 import { User } from "../entities/User";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 export class PaymentController {
 
@@ -453,10 +456,57 @@ export class PaymentController {
                 return res.status(400).json({ error: "No slip file uploaded." });
             }
             const paymentId = String(req.params.paymentId);
-            const slipUrl = `/uploads/bank-slips/${req.file.filename}`;
+            
+            // Generate filename if undefined (memory storage/Vercel)
+            let filename = req.file.filename;
+            if (!filename) {
+                // Try from path
+                if (req.file.path) {
+                    filename = path.basename(req.file.path);
+                } else {
+                    const ext = path.extname(req.file.originalname).toLowerCase();
+                    filename = `${crypto.randomUUID()}${ext}`;
+                }
+            }
+
+            let slipUrl = `/uploads/bank-slips/${filename}`;
+
+            // Check for Blob token (Vercel)
+            const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
+            
+            if (blobToken) {
+                const { put } = require('@vercel/blob');
+                let fileBuffer;
+                
+                if (req.file.buffer) {
+                    fileBuffer = req.file.buffer;
+                } else if (req.file.path && fs.existsSync(req.file.path)) {
+                    fileBuffer = fs.readFileSync(req.file.path);
+                } else {
+                     throw new Error("File content not available for upload");
+                }
+
+                const { url } = await put(`uploads/bank-slips/${filename}`, fileBuffer, {
+                    access: 'public',
+                    token: blobToken,
+                });
+                slipUrl = url;
+
+                // Cleanup local file if it exists
+                if (req.file.path && fs.existsSync(req.file.path)) {
+                    fs.unlinkSync(req.file.path);
+                }
+            } else {
+               // If on Vercel but no blob key, warn
+               if (process.env.VERCEL) {
+                   console.warn("WARNING: Uploading to local ephemeral storage. Configure BLOB_READ_WRITE_TOKEN.");
+               }
+            }
+
             const payment = await paymentService.uploadBankSlip(paymentId, String(req.session.userId!), slipUrl);
             return res.json({ message: "Bank slip uploaded. Your payment is under review.", payment });
         } catch (error: any) {
+            console.error("Upload slip error:", error);
             return res.status(error.message === "Forbidden." ? 403 : 400).json({ error: error.message });
         }
     }

@@ -8,6 +8,7 @@ import { Enrollment } from "../entities/Enrollment";
 import { Class } from "../entities/Class";
 import { Course } from "../entities/Course";
 import { Booking, BookingStatus } from "../entities/Booking";
+import ZoomService from "../services/ZoomService";
 
 const recordingRepository = AppDataSource.getRepository(Recording);
 const sessionRepository = AppDataSource.getRepository(Session);
@@ -17,6 +18,99 @@ const courseRepository = AppDataSource.getRepository(Course);
 const bookingRepository = AppDataSource.getRepository(Booking);
 
 export class RecordingController {
+  /**
+   * Manually sync recordings from Zoom for a specific session
+   * POST /api/recordings/sync/:sessionId
+   */
+  static async syncWithZoom(req: Request, res: Response) {
+    try {
+      const sessionId = req.params.sessionId as string;
+      const userId = req.session.userId;
+      const userRole = req.session.userRole;
+
+      const session = await sessionRepository.findOne({
+        where: { id: sessionId },
+        relations: ["class", "booking"],
+      });
+
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      // Check authorization (Instructor MUST own the session)
+      const isOwner =
+        session.teacherId === userId ||
+        session.class?.teacherId === userId ||
+        session.booking?.teacherId === userId;
+
+      if (!isOwner && userRole !== "admin") {
+        return res.status(403).json({ error: "Not authorized to sync recordings for this session" });
+      }
+
+      if (!session.meetingId) {
+        return res.status(400).json({ error: "Session does not have a Zoom meeting ID" });
+      }
+
+      // Fetch from Zoom
+      const zoomRecordings = await ZoomService.getMeetingRecordings(session.meetingId);
+
+      if (zoomRecordings.length === 0) {
+        return res.status(404).json({ message: "No recordings found in Zoom yet. Please try again later (processing takes time)." });
+      }
+
+      // Save recordings
+      const savedRecordings = [];
+      for (const videoFile of zoomRecordings) {
+        // Skip if already exists
+        const existing = await recordingRepository.findOne({
+          where: { metadata: { zoomFileId: videoFile.id } as any },
+        });
+
+        if (existing) {
+          savedRecordings.push(existing);
+          continue;
+        }
+
+        // Prefer MP4 video files
+        if (videoFile.fileType === 'MP4' || !zoomRecordings.some(f => f.fileType === 'MP4')) {
+           const recording = recordingRepository.create({
+            sessionId: session.id,
+            fileUrl: videoFile.playUrl, // Use playUrl for sharing
+            fileSize: videoFile.fileSize,
+            durationMinutes: videoFile.duration,
+            videoQuality: videoFile.fileType,
+            isProcessed: true,
+            isPublic: false, // Default to private
+            uploadedAt: new Date(videoFile.recordingStart),
+            metadata: {
+              zoomFileId: videoFile.id,
+              downloadUrl: videoFile.downloadUrl,
+              recordingEnd: videoFile.recordingEnd
+            }
+          });
+          await recordingRepository.save(recording);
+          savedRecordings.push(recording);
+        }
+      }
+
+      // Mark session as recorded
+      if (savedRecordings.length > 0) {
+        session.isRecorded = true;
+        await sessionRepository.save(session);
+      }
+
+      return res.json({
+        message: "Sync complete",
+        count: savedRecordings.length,
+        recordings: savedRecordings
+      });
+
+    } catch (error: any) {
+      console.error("Sync recording error:", error);
+      return res.status(500).json({ error: "Failed to sync recording from Zoom", details: error.message });
+    }
+  }
+
   /**
    * Create/Update recording (associate with session)
    * POST /api/recordings
@@ -30,7 +124,7 @@ export class RecordingController {
         return res.status(403).json({ error: "Only instructors can create recordings" });
       }
 
-      const {
+      let {
         sessionId,
         fileUrl,
         fileSize,
@@ -41,11 +135,46 @@ export class RecordingController {
         metadata,
       } = req.body;
 
+      // Handle file uploads if present
+      // req.files is set by multer .fields()
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
+      if (files) {
+        if (files.videoFile && files.videoFile.length > 0) {
+          const videoFile = files.videoFile[0];
+          const protocol = req.protocol;
+          const host = req.get("host");
+          // Ensure path uses forward slashes for URL
+          fileUrl = `${protocol}://${host}/uploads/session-recordings/${videoFile.filename}`;
+          fileSize = videoFile.size;
+          
+          // Construct metadata for uploaded file
+          if (!metadata) metadata = {};
+          if (typeof metadata === 'string') {
+            try {
+              metadata = JSON.parse(metadata);
+            } catch (e) {
+              metadata = {};
+            }
+          }
+          // Type assertion to bypass TS error on dynamic assignment to unknown
+          (metadata as any).originalName = videoFile.originalname;
+          (metadata as any).mimeType = videoFile.mimetype;
+        }
+
+        if (files.thumbnailFile && files.thumbnailFile.length > 0) {
+          const thumbFile = files.thumbnailFile[0];
+          const protocol = req.protocol;
+          const host = req.get("host");
+          thumbnailUrl = `${protocol}://${host}/uploads/session-recordings/${thumbFile.filename}`;
+        }
+      }
+
       // Validation — only fileUrl is required; sessionId is optional.
       // Recordings can be standalone (no linked session) when added manually
       // through the UI without an associated booking session.
       if (!fileUrl) {
-        return res.status(400).json({ error: "File URL is required" });
+        return res.status(400).json({ error: "File URL is required (or upload a video file)" });
       }
 
       // When sessionId is supplied, verify it exists and that the teacher owns it.
@@ -55,28 +184,25 @@ export class RecordingController {
       if (sessionId) {
         session = await sessionRepository.findOne({
           where: { id: sessionId },
-          relations: ["class"],
+          relations: ["class", "booking"],
         });
 
         if (!session) {
           return res.status(404).json({ error: "Session not found. Omit sessionId to create a standalone recording." });
         }
 
-        // Get class to check teacher ownership
-        if (!session.classId) {
-          return res.status(404).json({ error: "No class associated with this session" });
+        // Check ownership via Class or Booking
+        let isAuthorized = false;
+        
+        if (userRole === "admin") {
+            isAuthorized = true;
+        } else if (session.class) {
+            if (session.class.teacherId === userId) isAuthorized = true;
+        } else if (session.booking) {
+            if (session.booking.teacherId === userId) isAuthorized = true;
         }
 
-        const classEntity = await classRepository.findOne({
-          where: { id: session.classId },
-        });
-
-        if (!classEntity) {
-          return res.status(404).json({ error: "Class not found" });
-        }
-
-        // Check if teacher owns the class (or is admin)
-        if (classEntity.teacherId !== userId && userRole !== "admin") {
+        if (!isAuthorized) {
           return res.status(403).json({ error: "Not authorized to create recording for this session" });
         }
       }
@@ -280,7 +406,7 @@ export class RecordingController {
         }
       }
 
-      const {
+      let {
         fileUrl,
         durationMinutes,
         videoQuality,
@@ -288,6 +414,43 @@ export class RecordingController {
         isPublic,
         metadata,
       } = req.body;
+
+      // Handle file uploads if present
+      // req.files is set by multer .fields()
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
+      if (files) {
+        if (files.videoFile && files.videoFile.length > 0) {
+          const videoFile = files.videoFile[0];
+          const protocol = req.protocol;
+          const host = req.get("host");
+          // Ensure path uses forward slashes for URL
+          fileUrl = `${protocol}://${host}/uploads/session-recordings/${videoFile.filename}`;
+          recording.fileSize = videoFile.size;
+          
+          // Construct metadata for uploaded file
+          if (!metadata && recording.metadata) metadata = recording.metadata;
+          if (!metadata) metadata = {};
+          
+          if (typeof metadata === 'string') {
+            try {
+              metadata = JSON.parse(metadata);
+            } catch (e) {
+              metadata = {};
+            }
+          }
+          // Type assertion to bypass TS error on dynamic assignment to unknown
+          (metadata as any).originalName = videoFile.originalname;
+          (metadata as any).mimeType = videoFile.mimetype;
+        }
+
+        if (files.thumbnailFile && files.thumbnailFile.length > 0) {
+          const thumbFile = files.thumbnailFile[0];
+          const protocol = req.protocol;
+          const host = req.get("host");
+          thumbnailUrl = `${protocol}://${host}/uploads/session-recordings/${thumbFile.filename}`;
+        }
+      }
 
       // Update fields
       if (fileUrl !== undefined) recording.fileUrl = fileUrl;

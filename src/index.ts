@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import express, { Application, Request, Response } from "express";
+import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import session from "express-session";
@@ -227,6 +227,32 @@ app.all("/api/internal/jobs/recordings-fetch", async (req: Request, res: Respons
     console.error("Failed to run RecordingFetchJob:", error);
     return res.status(500).json({ error: "Failed to run job" });
   }
+});
+
+// Global Error Handler
+// Middleware with 4 arguments is treated as error handler by Express
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error("Global error:", err);
+  
+  if (err instanceof Error) {
+    if (err.message.includes("Invalid file type")) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err.message.includes("File too large")) {
+      return res.status(413).json({ error: "File too large. Max size is 100MB." });
+    }
+  }
+
+  // Multer errors often have a code property
+  if (err.code === "LIMIT_FILE_SIZE") {
+     return res.status(413).json({ error: "File too large. Max size is 100MB." });
+  }
+
+  res.status(500).json({ 
+    error: "Internal Server Error", 
+    message: err.message || "An unexpected error occurred"
+  });
 });
 
 // Start server + background jobs only outside Vercel serverless
