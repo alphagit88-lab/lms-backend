@@ -299,6 +299,79 @@ export class NotificationService {
     }
   }
 
+  // ─── Session Scheduled ─────────────────────────────────────────────────────
+
+  static async notifySessionScheduled(
+    sessionTitle: string,
+    startTime: Date,
+    teacherName: string,
+    students: User[],
+    meetingLink?: string,
+    referenceId?: string
+  ): Promise<void> {
+    const formattedTime = startTime.toLocaleString("en-GB", {
+      weekday: "short",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    for (const student of students) {
+      // 1. Notify Student
+      await NotificationService.createInApp(
+        student.id,
+        NotificationType.SESSION_REMINDER, // Re-using reminder type or add new one
+        "New Session Scheduled",
+        `New session "${sessionTitle}" scheduled for ${formattedTime}.`,
+        referenceId,
+        "/student/dashboard"
+      );
+
+      void EmailService.sendSessionScheduled({
+        to: student.email,
+        studentName: `${student.firstName} ${student.lastName}`,
+        sessionTitle,
+        startTime: formattedTime,
+        teacherName,
+        meetingLink,
+      });
+
+      // 2. Notify Parents
+      // We need to fetch parents. Since NotificationService is static and we want to avoid circular deps or complex injection, 
+      // we'll do a quick query here using AppDataSource.
+      // Importing StudentParent at top of file if not present, or use getRepository("StudentParent") string
+      const parentLinks = await AppDataSource.getRepository("StudentParent").find({ 
+        where: { studentId: student.id, status: "accepted" },
+        relations: ["parent"]
+      }) as any[]; // cast to any to avoid importing the entity if not convenient, but better to import
+
+      for (const link of parentLinks) {
+        if (link.parent) {
+          const parent = link.parent as User;
+          await NotificationService.createInApp(
+            parent.id,
+            NotificationType.SESSION_REMINDER,
+            "New Session for " + student.firstName,
+            `A new session "${sessionTitle}" has been scheduled for ${student.firstName} on ${formattedTime}.`,
+            referenceId,
+            "/parent/dashboard"
+          );
+           // Optionally send email to parent too
+           void EmailService.sendSessionScheduled({
+            to: parent.email,
+            studentName: `Parent of ${student.firstName}`, // Adjusted greeting
+            sessionTitle,
+            startTime: formattedTime,
+            teacherName,
+            meetingLink, // Parents might want to know the link too? Maybe not.
+          });
+        }
+      }
+    }
+  }
+
   // ─── Session Reminder ──────────────────────────────────────────────────────
 
   static async notifySessionReminder(

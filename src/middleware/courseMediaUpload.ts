@@ -20,7 +20,7 @@ try {
 // Allowed file types (Images for thumbnail, Videos for preview)
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm"];
 const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm"];
-const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_SIZE = 500 * 1024 * 1024; // 500MB
 
 const storage = multer.diskStorage({
     destination: (_req, _file, cb) => {
