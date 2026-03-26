@@ -10,6 +10,7 @@ import { parsePagination, createPaginationMeta } from "../utils/pagination";
 import ZoomService from "../services/ZoomService";
 import { Logger } from "../utils/logger";
 import { isZoomFreePlan, ZOOM_MAX_FREE_DURATION_MINUTES } from "../config/zoomConfig";
+import { NotificationService } from "../services/NotificationService"; // NEW
 
 export class SessionController {
     /**
@@ -284,6 +285,50 @@ export class SessionController {
             await sessionRepo.save(session);
 
             Logger.info(`Created ad-hoc session ${session.id} for teacher ${teacherId}`);
+
+            // ─── Notification Logic ──────────────────────────────────────────
+            // If class/course associated, notify enrolled students
+            const userRepo = AppDataSource.getRepository(User);
+            let studentsToNotify: User[] = [];
+
+            if (targetClassId) {
+                const classObj = await AppDataSource.getRepository(Class).findOne({ 
+                    where: { id: targetClassId },
+                    relations: ["course"]
+                });
+                if (classObj && classObj.course) {
+                    const enrollments = await AppDataSource.getRepository(Enrollment).find({
+                        where: { courseId: classObj.course.id, status: "active" },
+                        relations: ["student"]
+                    });
+                    studentsToNotify = enrollments.map(e => e.student).filter(Boolean);
+                }
+            } else if (bookingId) {
+                 const booking = await AppDataSource.getRepository(Booking).findOne({ 
+                    where: { id: bookingId },
+                    relations: ["student"]
+                });
+                if (booking && booking.student) {
+                    studentsToNotify = [booking.student];
+                }
+            }
+            
+            if (studentsToNotify.length > 0) {
+                const teacher = await userRepo.findOne({ where: { id: teacherId } });
+                const teacherName = teacher ? `${teacher.firstName} ${teacher.lastName}` : "Instructor";
+                
+                // Fire and forget notification
+                NotificationService.notifySessionScheduled(
+                    session.title,
+                    session.startTime,
+                    teacherName,
+                    studentsToNotify,
+                    session.meetingLink,
+                    session.id
+                ).catch(err => Logger.error("Failed to send session notifications", err));
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             return res.status(201).json({ message: "Session created", session });
         } catch (error) {
             Logger.error("Error creating session:", error);

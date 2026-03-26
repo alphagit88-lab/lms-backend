@@ -122,13 +122,14 @@ export const getStudentExams = async (req: Request, res: Response): Promise<Resp
         "sub.graded_at AS gradedAt",
         "sub.time_spent_minutes AS timeSpentMinutes",
         "sub.attempt_number AS attemptNumber",
+        "sub.status AS status",
         "course.title AS courseTitle",
         "course.id AS courseId",
       ])
       .where("sub.student_id = :studentId", { studentId })
       .andWhere("sub.question_id IS NULL")
       .andWhere("sub.status IN (:...statuses)", {
-        statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED],
+        statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED, SubmissionStatus.SUBMITTED],
       })
       .orderBy("sub.submitted_at", "DESC")
       .getRawMany();
@@ -137,7 +138,11 @@ export const getStudentExams = async (req: Request, res: Response): Promise<Resp
       const marks = Number(s.marksAwarded ?? 0);
       const total = Number(s.totalMarks ?? 1);
       const score = total > 0 ? Number(((marks / total) * 100).toFixed(1)) : 0;
-      const passed = s.passingMarks != null ? marks >= Number(s.passingMarks) : null;
+      
+      // Only calculate pass/fail if the exam is actually graded
+      const isGraded = s.status === SubmissionStatus.GRADED || s.status === SubmissionStatus.RETURNED;
+      const passed = (isGraded && s.passingMarks != null) ? marks >= Number(s.passingMarks) : null;
+
       return {
         submissionId: s.submissionId,
         examId: s.examId,
@@ -286,25 +291,25 @@ export const getStudentTimeline = async (req: Request, res: Response): Promise<R
         .andWhere("lp.completed_at IS NOT NULL")
         .getRawMany(),
 
-      // Exam graded events (master only)
+      // Exam graded/submitted events (master only)
       submissionRepo
         .createQueryBuilder("sub")
         .innerJoin("sub.exam", "exam")
         .leftJoin("exam.course", "c")
         .select([
-          "sub.graded_at AS eventDate",
+          "COALESCE(sub.graded_at, sub.submitted_at) AS eventDate",
           "exam.title AS title",
           "sub.id AS referenceId",
           "sub.marksAwarded AS marksAwarded",
           "exam.totalMarks AS totalMarks",
+          "sub.status AS status",
           "c.title AS courseTitle",
         ])
         .where("sub.student_id = :studentId", { studentId })
         .andWhere("sub.question_id IS NULL")
         .andWhere("sub.status IN (:...statuses)", {
-          statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED],
+          statuses: [SubmissionStatus.GRADED, SubmissionStatus.RETURNED, SubmissionStatus.SUBMITTED],
         })
-        .andWhere("sub.graded_at IS NOT NULL")
         .getRawMany(),
     ]);
 
@@ -335,9 +340,11 @@ export const getStudentTimeline = async (req: Request, res: Response): Promise<R
           s.totalMarks > 0
             ? Number(((s.marksAwarded / s.totalMarks) * 100).toFixed(1))
             : null;
+        
+        const isGraded = s.status === SubmissionStatus.GRADED || s.status === SubmissionStatus.RETURNED;
         return {
           type: "exam_graded" as const,
-          title: `Exam graded: "${s.title}"`,
+          title: isGraded ? `Exam graded: "${s.title}"` : `Exam submitted: "${s.title}"`,
           subtitle: s.courseTitle,
           referenceId: s.referenceId,
           eventDate: s.eventDate,

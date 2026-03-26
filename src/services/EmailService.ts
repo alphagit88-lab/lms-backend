@@ -284,4 +284,27 @@ export class EmailService {
     `);
     await EmailService.sendEmail(opts.to, `📋 Progress Report: ${opts.studentName} — LMS`, html);
   }
+
+  static async sendSessionScheduled(opts: {
+    to: string;
+    studentName: string;
+    sessionTitle: string;
+    startTime: string;
+    teacherName: string;
+    meetingLink?: string;
+  }): Promise<void> {
+    const html = baseLayout(`
+      <span class="tag tag-info">New Session</span>
+      <h2 style="margin:18px 0 6px;font-size:20px;color:#1e293b">📅 New Session Scheduled</h2>
+      <p style="color:#64748b;margin:0 0 20px;font-size:14px">Hi ${opts.studentName}, a new session has been scheduled.</p>
+      <table class="detail">
+        <tr><td>Topic</td><td>${opts.sessionTitle}</td></tr>
+        <tr><td>Instructor</td><td>${opts.teacherName}</td></tr>
+        <tr><td>Time</td><td>${opts.startTime}</td></tr>
+      </table>
+      ${opts.meetingLink ? `<a href="${opts.meetingLink}" class="btn">Join Meeting</a>` : ""}
+      <p style="color:#94a3b8;font-size:12px;margin-top:16px">Please check your schedule for more details.</p>
+    `);
+    await EmailService.sendEmail(opts.to, `📅 New Session: ${opts.sessionTitle} — LMS`, html);
+  }
 }

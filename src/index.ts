@@ -34,6 +34,7 @@ import gradingRoutes from "./routes/gradingRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import progressReportRoutes from "./routes/progressReportRoutes";
 import analyticsRoutes from "./routes/analyticsRoutes";
+import uploadRoutes from "./routes/uploadRoutes";
 import { RecordingFetchJob } from "./jobs/RecordingFetchJob";
 import { startPayoutJob } from "./jobs/PayoutJob";
 import { startBookingCleanupJob } from "./jobs/BookingCleanupJob";
@@ -69,8 +70,8 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "500mb" }));
+app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
 // 2. Lazy DB init for serverless environments (e.g. Vercel)
 let dbMigrated = false;
@@ -205,6 +206,7 @@ app.use("/api/grading", gradingRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/progress-reports", progressReportRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/upload", uploadRoutes);
 app.use("/api", userRoutes);
 
 // Internal endpoint for Vercel Cron / manual triggering
