@@ -88,6 +88,7 @@ export class BookingController {
 
       // Update booking with Zoom details
       booking.meetingLink = zoomResponse.joinUrl;
+      booking.meetingStartLink = zoomResponse.startUrl;
       booking.meetingId = zoomResponse.meetingId;
       booking.meetingPassword = zoomResponse.password;
 
@@ -107,6 +108,7 @@ export class BookingController {
           sessionType: SessionType.LIVE,
           status: SessionStatus.SCHEDULED,
           meetingLink: zoomResponse.joinUrl,
+          meetingStartLink: zoomResponse.startUrl,
           meetingId: zoomResponse.meetingId,
           meetingPassword: zoomResponse.password,
         });
@@ -121,6 +123,7 @@ export class BookingController {
           sessionType: SessionType.LIVE,
           status: SessionStatus.SCHEDULED,
           meetingLink: zoomResponse.joinUrl,
+          meetingStartLink: zoomResponse.startUrl,
           meetingId: zoomResponse.meetingId,
           meetingPassword: zoomResponse.password,
         });

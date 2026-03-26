@@ -100,6 +100,7 @@ export class AuthController {
    */
   static async login(req: Request, res: Response) {
     try {
+      console.log("Login attempt:", req.body.email);
       const { email, password } = req.body;
 
       // Validation
@@ -109,12 +110,27 @@ export class AuthController {
           .json({ error: "Email and password are required" });
       }
 
+      // Check DB connection first to avoid 500 later
+      if (!AppDataSource.isInitialized) {
+        console.error("Database not initialized. Cannot process login.");
+        return res.status(503).json({ error: "Service unavailable. Database connecting..." });
+      }
+
+      console.log("Calling authService.login...");
       const user = await authService.login(email, password);
+      console.log("User logged in successfully:", user.id);
 
       // Create session
+      if (!req.session) {
+        console.error("Session object is missing on request!");
+        return res.status(500).json({ error: "Session initialization failed" });
+      }
+
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       req.session.userRole = user.role;
+
+      console.log("Session data set. Saving session...");
 
       // EXPLICIT SAVE: Crucial for serverless environments (Vercel) to ensure session is written before response
       await new Promise<void>((resolve, reject) => {
@@ -123,6 +139,7 @@ export class AuthController {
             console.error("Session save error:", err);
             reject(err);
           } else {
+            console.log("Session saved successfully.");
             resolve();
           }
         });
@@ -137,11 +154,13 @@ export class AuthController {
         error.message === "Invalid email or password" ||
         error.message === "Account is deactivated"
       ) {
+        console.warn(`Login failed for ${req.body.email}: ${error.message}`);
         return res.status(401).json({ error: error.message });
       }
-      console.error("Login error:", error);
+      console.error("Login error details:", error);
+      console.error("Stack trace:", error.stack);
       // Return detailed error message for debugging purposes
-      res.status(500).json({ error: "Login failed", details: error.message });
+      res.status(500).json({ error: "Login failed", details: error.message, stack: process.env.NODE_ENV === 'development' ? error.stack : undefined });
     }
   }
 

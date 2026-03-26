@@ -174,12 +174,30 @@ class PayHereService {
             country = "Sri Lanka",
         } = params;
 
-        const appUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-        const apiUrl = process.env.API_URL || "http://localhost:5000";
+        // Determine base URLs based on environment
+        let appUrl = process.env.FRONTEND_URL;
+        let apiUrl = process.env.API_URL;
+
+        // If on Vercel and URLs are missing, try to construct them from VERCEL_URL
+        if (process.env.VERCEL) {
+            // VERCEL_URL is the domain of the current deployment (e.g. project.vercel.app)
+            const vercelUrl = `https://${process.env.VERCEL_URL}`;
+            if (!appUrl) appUrl = vercelUrl; // Fallback for frontend (assuming monorepo or same domain)
+            if (!apiUrl) apiUrl = vercelUrl; // Fallback for backend
+        }
+
+        // Final local fallbacks
+        if (!appUrl) appUrl = "http://localhost:3000";
+        if (!apiUrl) apiUrl = "http://localhost:5000";
+
+        // Ensure no trailing slashes for clean concatenation
+        appUrl = appUrl.replace(/\/$/, "");
+        apiUrl = apiUrl.replace(/\/$/, "");
+
         const formattedAmount = this.formatAmount(amount);
         const hash = this.generateRequestHash(orderId, amount, currency);
 
-        return {
+        const checkoutParams = {
             merchant_id: this.merchantId,
             return_url: `${appUrl}/payments/success?order_id=${orderId}`,
             cancel_url: `${appUrl}/payments/cancel?order_id=${orderId}`,
@@ -197,6 +215,14 @@ class PayHereService {
             country,
             hash,
         };
+
+        console.log("PayHere Checkout Params Generated:", {
+            ...checkoutParams,
+            merchant_id: checkoutParams.merchant_id ? "***" : "MISSING", // redact sensitive info
+            hash: "REDACTED"
+        });
+
+        return checkoutParams;
     }
 }
 

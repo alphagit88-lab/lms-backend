@@ -119,7 +119,26 @@ export class AuthService {
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    let isPasswordValid = false;
+    try {
+      // Check if password looks like a bcrypt hash (starts with $2a$, $2b$, or $2y$)
+      if (!user.password || !user.password.startsWith('$2')) {
+        console.warn(`User ${email} has an invalid password hash format. Reset required.`);
+        // Don't throw 500, just fail login
+        throw new Error("Invalid email or password"); 
+      }
+      
+      isPasswordValid = await bcrypt.compare(password, user.password);
+    } catch (bcryptError) {
+      console.error(`Bcrypt error for user ${email}:`, bcryptError);
+      // Determine if it was the hash format error we just threw or a real bcrypt error
+      if (bcryptError instanceof Error && bcryptError.message === "Invalid email or password") {
+         throw bcryptError;
+      }
+      // If bcrypt throws (e.g. data and hash arguments required), treat as invalid credentials safely
+      throw new Error("Invalid email or password");
+    }
+
     if (!isPasswordValid) {
       throw new Error("Invalid email or password");
     }

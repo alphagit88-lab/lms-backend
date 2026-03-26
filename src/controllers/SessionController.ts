@@ -111,7 +111,7 @@ export class SessionController {
             const sessionRepo = AppDataSource.getRepository(Session);
             const session = await sessionRepo.findOne({
                 where: { id },
-                relations: ["class", "booking", "class.teacher", "booking.teacher", "booking.student"],
+                relations: ["class", "booking", "recording", "class.teacher", "booking.teacher", "booking.student"],
             });
 
             if (!session) {
@@ -190,6 +190,7 @@ export class SessionController {
             const teacherId = req.session.userId!;
             const {
                 classId,
+                courseId, // Added courseId
                 bookingId,
                 title,
                 description,
@@ -198,6 +199,16 @@ export class SessionController {
                 sessionType,
                 createZoomMeeting: shouldCreateZoom,
             } = req.body;
+
+            // Logic to find classId from classId OR courseId
+            let targetClassId = classId;
+            if (!targetClassId && courseId) {
+                const classRepo = AppDataSource.getRepository(Class);
+                const existingClass = await classRepo.findOne({ where: { courseId, teacherId } });
+                if (existingClass) {
+                    targetClassId = existingClass.id;
+                }
+            }
 
             if (!title || !startTime || !endTime) {
                 return res.status(400).json({ error: "title, startTime and endTime are required" });
@@ -231,6 +242,7 @@ export class SessionController {
             const sessionRepo = AppDataSource.getRepository(Session);
 
             let meetingLink: string | undefined;
+            let meetingStartLink: string | undefined;
             let meetingId: string | undefined;
             let meetingPassword: string | undefined;
 
@@ -240,6 +252,7 @@ export class SessionController {
                     const duration = Math.round((end.getTime() - start.getTime()) / 60000);
                     const zoomResp = await ZoomService.createMeeting({ topic: title, startTime: start, duration });
                     meetingLink = zoomResp.joinUrl;
+                    meetingStartLink = zoomResp.startUrl;
                     meetingId = zoomResp.meetingId;
                     meetingPassword = zoomResp.password;
                 } catch (zoomError) {
@@ -254,7 +267,7 @@ export class SessionController {
 
             const session = sessionRepo.create({
                 teacherId, // Explicitly track the creator for ad-hoc sessions
-                classId: classId || undefined,
+                classId: targetClassId || undefined,
                 bookingId: bookingId || undefined,
                 title,
                 description: description || undefined,
@@ -263,6 +276,7 @@ export class SessionController {
                 sessionType: sessionType || SessionType.LIVE,
                 status: SessionStatus.SCHEDULED,
                 meetingLink,
+                meetingStartLink,
                 meetingId,
                 meetingPassword,
             });

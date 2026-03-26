@@ -13,6 +13,7 @@ import { Category } from "./Category";
 import { Lesson } from "./Lesson";
 import { Enrollment } from "./Enrollment";
 import { Exam } from "./Exam";
+import { Content } from "./Content";
 
 @Entity("courses")
 export class Course {
@@ -108,7 +109,8 @@ export class Course {
 
   @OneToMany(() => Lesson, (lesson) => lesson.course)
   lessons!: Lesson[];
-
+  @OneToMany(() => Content, (content) => content.course)
+  contents?: Content[];
   @OneToMany(() => Enrollment, (enrollment) => enrollment.course)
   enrollments!: Enrollment[];
 

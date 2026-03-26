@@ -24,6 +24,20 @@ const MAX_SIZE = 100 * 1024 * 1024; // 100MB
 
 const storage = multer.diskStorage({
     destination: (_req, _file, cb) => {
+        // Log destination path for debugging
+        console.log(`[Multer] Saving file to: ${COURSE_MEDIA_DIR}`);
+        
+        // Ensure directory exists just in case
+        if (!fs.existsSync(COURSE_MEDIA_DIR)) {
+            try {
+                fs.mkdirSync(COURSE_MEDIA_DIR, { recursive: true });
+                console.log(`[Multer] Created directory: ${COURSE_MEDIA_DIR}`);
+            } catch (err) {
+                console.error("Failed to create course media directory:", err);
+                // Return error to callback instead of ignoring
+                return cb(err as Error, COURSE_MEDIA_DIR); 
+            }
+        }
         cb(null, COURSE_MEDIA_DIR);
     },
     filename: (_req, file, cb) => {
