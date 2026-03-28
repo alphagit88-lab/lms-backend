@@ -49,10 +49,10 @@ export class AuthController {
         });
       }
 
-      // Role validation (if provided)
-      if (role && !["student", "instructor", "parent", "admin"].includes(role)) {
+      // Role validation (prevent "admin" registration)
+      if (role && !["student", "instructor", "parent"].includes(role)) {
         return res.status(400).json({
-          error: "Invalid role. Must be student, instructor, parent, or admin",
+          error: "Invalid role. Must be student, instructor, or parent. Admin registration is not permitted.",
         });
       }
 
