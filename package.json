@@ -49,6 +49,7 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "@types/bcryptjs": "^3.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
@@ -67,5 +68,11 @@
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "tesseract.js"
+    ]
   }
 }
