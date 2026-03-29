@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { CategoryController } from "../controllers/CategoryController";
-import { authenticate, isAdmin } from "../middleware/authMiddleware";
+import { authenticate, isAdmin, isInstructorOrAdmin } from "../middleware/authMiddleware";
 
 const router = Router();
 
@@ -8,9 +8,9 @@ const router = Router();
 router.get("/", CategoryController.getAll);
 router.get("/:id", CategoryController.getById);
 
-// Admin routes
-router.post("/", authenticate, isAdmin, CategoryController.create);
-router.put("/:id", authenticate, isAdmin, CategoryController.update);
+// Admin / Instructor routes
+router.post("/", authenticate, isInstructorOrAdmin, CategoryController.create);
+router.put("/:id", authenticate, isInstructorOrAdmin, CategoryController.update);
 router.delete("/:id", authenticate, isAdmin, CategoryController.delete);
 
 export default router;
