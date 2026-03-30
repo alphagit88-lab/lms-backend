@@ -491,16 +491,7 @@ export class ContentController {
         });
       }
 
-      // Require login for any content access
-      if (!userId) {
-        return res.json({
-          hasAccess: false,
-          canDownload: false,
-          reason: "Login required",
-        });
-      }
-
-      // Free content: open to all authenticated users
+      // Free content: open to all users (even guests)
       if (!content.isPaid) {
         return res.json({
           hasAccess: true,
@@ -509,8 +500,23 @@ export class ContentController {
         });
       }
 
-      // Paid content: check for a completed CONTENT_PURCHASE payment
-      const payment = await paymentRepository.findOne({
+      // From here on, content IS PAID
+      // Require login for any PAID content access
+      if (!userId) {
+        return res.json({
+          hasAccess: false,
+          canDownload: false,
+          reason: "Login and purchase required",
+          price: content.price,
+        });
+      }
+
+      // Paid content: Access granted if:
+      // 1. Direct CONTENT_PURCHASE exists
+      // 2. Student is ENROLLED in the course this content belongs to (if any)
+
+      // Check for direct purchase
+      const purchase = await paymentRepository.findOne({
         where: {
           userId,
           referenceId: id as string,
@@ -519,12 +525,31 @@ export class ContentController {
         },
       });
 
-      if (payment) {
+      if (purchase) {
         return res.json({
           hasAccess: true,
           canDownload: content.isDownloadable,
-          reason: "Payment completed",
+          reason: "Payment (direct purchase) completed",
         });
+      }
+
+      // Check for course enrollment (if content is locked to a course)
+      if (content.courseId) {
+        const enrollment = await enrollmentRepository.findOne({
+          where: {
+            studentId: userId,
+            courseId: content.courseId,
+            status: "active" as any,
+          },
+        });
+
+        if (enrollment) {
+          return res.json({
+            hasAccess: true,
+            canDownload: content.isDownloadable,
+            reason: `Access granted via course enrollment (${enrollment.courseId})`,
+          });
+        }
       }
 
       return res.json({
@@ -578,7 +603,8 @@ export class ContentController {
         hasAccess = true;
         accessReason = "Free content";
       } else if (userRole === "student" && userId) {
-        const payment = await paymentRepository.findOne({
+        // Check for direct purchase
+        const purchase = await paymentRepository.findOne({
           where: {
             userId: userId,
             referenceId: id as string,
@@ -587,9 +613,26 @@ export class ContentController {
           },
         });
 
-        if (payment) {
+        if (purchase) {
           hasAccess = true;
-          accessReason = "Payment completed";
+          accessReason = "Payment (direct purchase) completed";
+        } else if (content.courseId) {
+          // Check for course enrollment
+          const enrollment = await enrollmentRepository.findOne({
+            where: {
+              studentId: userId,
+              courseId: content.courseId,
+              status: "active" as any,
+            },
+          });
+
+          if (enrollment) {
+            hasAccess = true;
+            accessReason = `Access granted via course enrollment (${enrollment.courseId})`;
+          } else {
+            hasAccess = false;
+            accessReason = "Payment or Course Enrollment required";
+          }
         } else {
           hasAccess = false;
           accessReason = "Payment required";
@@ -611,15 +654,14 @@ export class ContentController {
       content.downloadCount += 1;
       await contentRepository.save(content);
 
-      // Return file URL (in production, use signed URL for S3)
-      const filePath = fileStorageService.getFilePath(content.fileUrl);
-
-      // Check if file exists
-      if (!fileStorageService.fileExists(content.fileUrl)) {
-        return res.status(404).json({ error: "File not found on server" });
+      // Serve file
+      if (content.fileUrl.startsWith('http')) {
+        // For cloud storage (like Vercel Blob), redirect to the public URL
+        return res.redirect(content.fileUrl);
       }
 
-      // Serve file
+      // Local file serving
+      const filePath = fileStorageService.getFilePath(content.fileUrl);
       res.sendFile(filePath, (err) => {
         if (err) {
           console.error("File serve error:", err);
@@ -651,24 +693,43 @@ export class ContentController {
       let hasAccess = false;
       if (userRole === "instructor" || userRole === "admin") {
         hasAccess = true;
-      } else if (content.isPublished && userId) {
+      } else if (content.isPublished) {
         if (!content.isPaid) {
           hasAccess = true;
-        } else {
-          const payment = await paymentRepository.findOne({
+        } else if (userId) {
+          // Check for direct purchase
+          const purchase = await paymentRepository.findOne({
             where: {
               userId,
-              referenceId: id,
+              referenceId: id as string,
               paymentType: PaymentType.CONTENT_PURCHASE,
               paymentStatus: "completed" as any,
             },
           });
-          hasAccess = !!payment;
+
+          if (purchase) {
+             hasAccess = true;
+          } else if (content.courseId) {
+             // Check for course enrollment
+             const enrollment = await enrollmentRepository.findOne({
+               where: {
+                 studentId: userId,
+                 courseId: content.courseId,
+                 status: "active" as any,
+               },
+             });
+             hasAccess = !!enrollment;
+          }
         }
       }
 
       if (!hasAccess) {
         return res.status(403).json({ error: "Access denied", reason: "Purchase required" });
+      }
+
+      // Serve remote/cloud storage
+      if (content.fileUrl.startsWith('http')) {
+        return res.redirect(content.fileUrl);
       }
 
       const filePath = fileStorageService.getFilePath(content.fileUrl);
