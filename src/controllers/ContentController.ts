@@ -670,9 +670,12 @@ export class ContentController {
           }
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Download content error:", error);
-      res.status(500).json({ error: "Failed to download content" });
+      res.status(500).json({ 
+        error: "Failed to download content", 
+        message: error.message 
+      });
     }
   }
 
