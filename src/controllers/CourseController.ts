@@ -6,6 +6,7 @@ import { AppDataSource } from "../config/data-source";
 import { Course } from "../entities/Course";
 import { User } from "../entities/User";
 import { Category } from "../entities/Category";
+import { Enrollment } from "../entities/Enrollment";
 import { TeacherProfile } from "../entities/TeacherProfile";
 import { validatePrice, validateStringLength } from "../utils/validation";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
@@ -16,6 +17,7 @@ const courseRepository = AppDataSource.getRepository(Course);
 const userRepository = AppDataSource.getRepository(User);
 const categoryRepository = AppDataSource.getRepository(Category);
 const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
+const enrollmentRepository = AppDataSource.getRepository(Enrollment);
 const fileStorageService = new FileStorageService();
 
 
@@ -146,14 +148,24 @@ export class CourseController {
       }
 
       // Check if user is enrolled (if authenticated)
-      let isEnrolled = false;
-      if (userId && course.enrollments) {
-        isEnrolled = course.enrollments.some((e) => e.studentId === userId);
+      let studentEnrollment = null;
+      if (userId) {
+        studentEnrollment = await enrollmentRepository.findOne({
+          where: { studentId: userId, courseId: id as string },
+          relations: ["lessonProgress"],
+        });
+      }
+
+      // Filter enrollments for privacy: don't send all enrollments to students
+      if (userRole === "student" && course.enrollments) {
+        delete (course as any).enrollments;
       }
 
       res.json({
         course,
-        isEnrolled,
+        isEnrolled: !!studentEnrollment,
+        enrollmentId: studentEnrollment?.id,
+        lessonProgress: studentEnrollment?.lessonProgress || [],
       });
     } catch (error) {
       console.error("Get course error:", error);

@@ -123,7 +123,24 @@ export class LessonController {
         return res.status(403).json({ error: "Enrollment required" });
       }
 
-      res.json({ lesson });
+      // Find enrollment to check progress
+      let progress = null;
+      if (userId) {
+        const enrollment = await AppDataSource.getRepository("Enrollment").findOne({
+          where: { studentId: userId, courseId: course.id },
+        });
+
+        if (enrollment) {
+          progress = await AppDataSource.getRepository("LessonProgress").findOne({
+            where: { enrollmentId: enrollment.id, lessonId: lesson.id },
+          });
+        }
+      }
+
+      res.json({ 
+        lesson,
+        progress 
+      });
     } catch (error) {
       console.error("Get lesson error:", error);
       res.status(500).json({ error: "Failed to fetch lesson" });
