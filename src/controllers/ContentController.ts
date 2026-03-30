@@ -42,7 +42,7 @@ export class ContentController {
         return res.status(403).json({ error: "Only instructors can upload content" });
       }
 
-      if (!req.file) {
+      if (!req.file && !req.body.fileUrl) {
         await queryRunner.rollbackTransaction();
         await queryRunner.release();
         return res.status(400).json({ error: "File is required" });
@@ -63,6 +63,8 @@ export class ContentController {
         thumbnailUrl,
         isPublished,
         courseId,
+        fileUrl: bodyFileUrl,
+        fileSize: bodyFileSize,
       } = req.body;
 
       // Validation
@@ -96,7 +98,6 @@ export class ContentController {
         return res.status(400).json({ error: "Invalid content type" });
       }
 
-      const { AcademicResourceType } = await import("../entities/Content");
       if (resourceType && !Object.values(AcademicResourceType).includes(resourceType as AcademicResourceType)) {
         await queryRunner.rollbackTransaction();
         await queryRunner.release();
@@ -119,13 +120,21 @@ export class ContentController {
         }
       }
 
-      // Save file first
-      const fileResult = await fileStorageService.saveFile(
-        req.file,
-        contentType,
-        userId!
-      );
-      fileUrl = fileResult.fileUrl;
+      let finalFileUrl = "";
+      let finalFileSize = 0;
+
+      if (req.file) {
+        const fileResult = await fileStorageService.saveFile(
+          req.file,
+          contentType,
+          userId!
+        );
+        finalFileUrl = fileResult.fileUrl;
+        finalFileSize = fileResult.fileSize;
+      } else {
+        finalFileUrl = bodyFileUrl;
+        finalFileSize = bodyFileSize || 0;
+      }
 
       // Create content record within transaction
       const content = queryRunner.manager.create(Content, {
@@ -135,11 +144,11 @@ export class ContentController {
         contentType: contentType as ContentType,
         resourceType: (resourceType as AcademicResourceType) || AcademicResourceType.OTHER,
         language: language || "english",
-        fileUrl: fileResult.fileUrl,
-        fileSize: fileResult.fileSize,
+        fileUrl: finalFileUrl,
+        fileSize: finalFileSize,
         thumbnailUrl: thumbnailUrl || null,
         isPaid: isPaid === "true" || isPaid === true,
-        price: isPaid === "true" || isPaid === true ? parseFloat(price) : undefined,
+        price: (isPaid === "true" || isPaid === true) ? parseFloat(price) : undefined,
         subject: subject || null,
         grade: grade || null,
         topic: topic || null,

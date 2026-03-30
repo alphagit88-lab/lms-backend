@@ -382,14 +382,6 @@ export class AuthController {
    */
   static async uploadProfilePicture(req: Request, res: Response) {
     try {
-      if (!req.session.userId) {
-        return res.status(401).json({ error: "Not authenticated" });
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ error: "No image file provided" });
-      }
-
       const userRepo = AppDataSource.getRepository(User);
       const user = await userRepo.findOne({ where: { id: req.session.userId } });
 
@@ -397,18 +389,27 @@ export class AuthController {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // Delete old profile picture if it exists
-      if (user.profilePicture) {
-        await fileStorageService.deleteFile(user.profilePicture);
+      let profilePictureUrl = "";
+
+      if (req.file) {
+        // Delete old profile picture if it exists
+        if (user.profilePicture) {
+          await fileStorageService.deleteFile(user.profilePicture);
+        }
+
+        const fileResult = await fileStorageService.saveFile(
+          req.file as any,
+          "images",
+          req.session.userId!
+        );
+        profilePictureUrl = fileResult.fileUrl;
+      } else if (req.body.profilePictureUrl) {
+        profilePictureUrl = req.body.profilePictureUrl;
+      } else {
+        return res.status(400).json({ error: "No image file or URL provided" });
       }
 
-      const fileResult = await fileStorageService.saveFile(
-        req.file as any,
-        "images",
-        req.session.userId!
-      );
-
-      user.profilePicture = fileResult.fileUrl;
+      user.profilePicture = profilePictureUrl;
       await userRepo.save(user);
 
       // Return the updated user (without password)
