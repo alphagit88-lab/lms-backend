@@ -17,35 +17,22 @@ try {
     // ignore directory creation errors on serverless if any
 }
 
-// Allowed file types (Images for thumbnail, Videos for preview)
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm"];
-const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm"];
+// Allowed file types (Images for thumbnail, Videos for preview, Documents for lessons)
+const ALLOWED_TYPES = [
+    "image/jpeg", "image/png", "image/webp", "image/gif", 
+    "video/mp4", "video/webm", "video/quicktime",
+    "application/pdf", 
+    "application/msword", 
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "audio/mpeg", "audio/wav", "audio/ogg"
+];
+const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".mov", ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".mp3", ".wav", ".ogg"];
 const MAX_SIZE = 500 * 1024 * 1024; // 500MB
 
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        // Log destination path for debugging
-        console.log(`[Multer] Saving file to: ${COURSE_MEDIA_DIR}`);
-        
-        // Ensure directory exists just in case
-        if (!fs.existsSync(COURSE_MEDIA_DIR)) {
-            try {
-                fs.mkdirSync(COURSE_MEDIA_DIR, { recursive: true });
-                console.log(`[Multer] Created directory: ${COURSE_MEDIA_DIR}`);
-            } catch (err) {
-                console.error("Failed to create course media directory:", err);
-                // Return error to callback instead of ignoring
-                return cb(err as Error, COURSE_MEDIA_DIR); 
-            }
-        }
-        cb(null, COURSE_MEDIA_DIR);
-    },
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const uniqueName = `${crypto.randomUUID()}${ext}`;
-        cb(null, uniqueName);
-    },
-});
+const storage = multer.memoryStorage();
+
 
 const fileFilter = (
     _req: Express.Request,

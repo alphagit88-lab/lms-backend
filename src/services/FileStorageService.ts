@@ -88,11 +88,18 @@ export class FileStorageService {
     const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
     if (blobToken) {
       const { put } = require('@vercel/blob');
-      const blobPath = `uploads/${contentTypeDir}/${teacherId}/${fileName}`;
+      // Normalize directory names for Blob (no leading slash, consistent structure)
+      const blobPath = `uploads/${contentTypeDir}/${teacherId}/${fileName}`.replace(/\/+/g, '/');
+      
+      console.log(`[FileStorageService] Uploading to Vercel Blob: ${blobPath}`);
+      
       const { url } = await put(blobPath, file.buffer, {
         access: 'public',
         token: blobToken,
+        contentType: file.mimetype,
       });
+      
+      console.log(`[FileStorageService] Upload successful: ${url}`);
       
       return {
         fileUrl: url,
@@ -100,6 +107,7 @@ export class FileStorageService {
         fileName,
       };
     }
+
 
     // Local Storage Fallback
     const teacherDir = path.join(this.uploadDir, contentTypeDir, teacherId);

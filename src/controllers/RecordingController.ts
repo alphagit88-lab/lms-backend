@@ -9,6 +9,7 @@ import { Class } from "../entities/Class";
 import { Course } from "../entities/Course";
 import { Booking, BookingStatus } from "../entities/Booking";
 import ZoomService from "../services/ZoomService";
+import { FileStorageService } from "../services/FileStorageService";
 
 const recordingRepository = AppDataSource.getRepository(Recording);
 const sessionRepository = AppDataSource.getRepository(Session);
@@ -16,6 +17,8 @@ const enrollmentRepository = AppDataSource.getRepository(Enrollment);
 const classRepository = AppDataSource.getRepository(Class);
 const courseRepository = AppDataSource.getRepository(Course);
 const bookingRepository = AppDataSource.getRepository(Booking);
+const fileStorageService = new FileStorageService();
+
 
 export class RecordingController {
   /**
@@ -142,11 +145,13 @@ export class RecordingController {
       if (files) {
         if (files.videoFile && files.videoFile.length > 0) {
           const videoFile = files.videoFile[0];
-          const protocol = req.protocol;
-          const host = req.get("host");
-          // Ensure path uses forward slashes for URL
-          fileUrl = `${protocol}://${host}/uploads/session-recordings/${videoFile.filename}`;
-          fileSize = videoFile.size;
+          const fileResult = await fileStorageService.saveFile(
+            videoFile as any,
+            "video",
+            userId || "system"
+          );
+          fileUrl = fileResult.fileUrl;
+          fileSize = fileResult.fileSize;
           
           // Construct metadata for uploaded file
           if (!metadata) metadata = {};
@@ -157,16 +162,18 @@ export class RecordingController {
               metadata = {};
             }
           }
-          // Type assertion to bypass TS error on dynamic assignment to unknown
           (metadata as any).originalName = videoFile.originalname;
           (metadata as any).mimeType = videoFile.mimetype;
         }
 
         if (files.thumbnailFile && files.thumbnailFile.length > 0) {
           const thumbFile = files.thumbnailFile[0];
-          const protocol = req.protocol;
-          const host = req.get("host");
-          thumbnailUrl = `${protocol}://${host}/uploads/session-recordings/${thumbFile.filename}`;
+          const fileResult = await fileStorageService.saveFile(
+            thumbFile as any,
+            "images",
+            userId || "system"
+          );
+          thumbnailUrl = fileResult.fileUrl;
         }
       }
 
@@ -422,11 +429,13 @@ export class RecordingController {
       if (files) {
         if (files.videoFile && files.videoFile.length > 0) {
           const videoFile = files.videoFile[0];
-          const protocol = req.protocol;
-          const host = req.get("host");
-          // Ensure path uses forward slashes for URL
-          fileUrl = `${protocol}://${host}/uploads/session-recordings/${videoFile.filename}`;
-          recording.fileSize = videoFile.size;
+          const fileResult = await fileStorageService.saveFile(
+            videoFile as any,
+            "video",
+            userId || "system"
+          );
+          fileUrl = fileResult.fileUrl;
+          recording.fileSize = fileResult.fileSize;
           
           // Construct metadata for uploaded file
           if (!metadata && recording.metadata) metadata = recording.metadata;
@@ -439,16 +448,18 @@ export class RecordingController {
               metadata = {};
             }
           }
-          // Type assertion to bypass TS error on dynamic assignment to unknown
           (metadata as any).originalName = videoFile.originalname;
           (metadata as any).mimeType = videoFile.mimetype;
         }
 
         if (files.thumbnailFile && files.thumbnailFile.length > 0) {
           const thumbFile = files.thumbnailFile[0];
-          const protocol = req.protocol;
-          const host = req.get("host");
-          thumbnailUrl = `${protocol}://${host}/uploads/session-recordings/${thumbFile.filename}`;
+          const fileResult = await fileStorageService.saveFile(
+            thumbFile as any,
+            "images",
+            userId || "system"
+          );
+          thumbnailUrl = fileResult.fileUrl;
         }
       }
 

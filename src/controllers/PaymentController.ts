@@ -10,6 +10,10 @@ import { User } from "../entities/User";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { FileStorageService } from "../services/FileStorageService";
+
+const fileStorageService = new FileStorageService();
+
 
 export class PaymentController {
 
@@ -410,12 +414,28 @@ export class PaymentController {
             if (req.session.userRole === "admin") {
                 return res.status(403).json({ error: "Admins cannot make payments." });
             }
+
             const { type, referenceId, amount, currency = "LKR", recipientId } = req.body;
+            const userId = req.session.userId!;
+
+            // Specialized methods for bookings/packages to ensure correct amount & teacher
+            if (type === PaymentType.BOOKING_SESSION) {
+                const result = await paymentService.initializeBookingManualPayment(referenceId, userId);
+                return res.status(201).json(result);
+            }
+
+            if (type === PaymentType.BOOKING_PACKAGE) {
+                const result = await paymentService.initializePackageManualPayment(referenceId, userId);
+                return res.status(201).json(result);
+            }
+
+            // Generic fallback for courses/others
             if (!type || !referenceId || amount === undefined || amount === null) {
                 return res.status(400).json({ error: "Missing required fields: type, referenceId, amount" });
             }
+
             const result = await paymentService.initializeBankTransferPayment({
-                userId: req.session.userId!,
+                userId,
                 amount: Number(amount),
                 currency,
                 type: type as PaymentType,
@@ -457,55 +477,18 @@ export class PaymentController {
             }
             const paymentId = String(req.params.paymentId);
             
-            // Generate filename if undefined (memory storage/Vercel)
-            let filename = req.file.filename;
-            if (!filename) {
-                // Try from path
-                if (req.file.path) {
-                    filename = path.basename(req.file.path);
-                } else {
-                    const ext = path.extname(req.file.originalname).toLowerCase();
-                    filename = `${crypto.randomUUID()}${ext}`;
-                }
-            }
+            const userId = req.session.userId!;
+            const fileResult = await fileStorageService.saveFile(
+              req.file as any,
+              "document",
+              userId
+            );
+            const slipUrl = fileResult.fileUrl;
 
-            let slipUrl = `/uploads/bank-slips/${filename}`;
-
-            // Check for Blob token (Vercel)
-            const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
-            
-            if (blobToken) {
-                const { put } = require('@vercel/blob');
-                let fileBuffer;
-                
-                if (req.file.buffer) {
-                    fileBuffer = req.file.buffer;
-                } else if (req.file.path && fs.existsSync(req.file.path)) {
-                    fileBuffer = fs.readFileSync(req.file.path);
-                } else {
-                     throw new Error("File content not available for upload");
-                }
-
-                const { url } = await put(`uploads/bank-slips/${filename}`, fileBuffer, {
-                    access: 'public',
-                    token: blobToken,
-                });
-                slipUrl = url;
-
-                // Cleanup local file if it exists
-                if (req.file.path && fs.existsSync(req.file.path)) {
-                    fs.unlinkSync(req.file.path);
-                }
-            } else {
-               // If on Vercel but no blob key, warn
-               if (process.env.VERCEL) {
-                   console.warn("WARNING: Uploading to local ephemeral storage. Configure BLOB_READ_WRITE_TOKEN.");
-               }
-            }
-
-            const payment = await paymentService.uploadBankSlip(paymentId, String(req.session.userId!), slipUrl);
+            const payment = await paymentService.uploadBankSlip(paymentId, userId, slipUrl);
             return res.json({ message: "Bank slip uploaded. Your payment is under review.", payment });
         } catch (error: any) {
+
             console.error("Upload slip error:", error);
             return res.status(error.message === "Forbidden." ? 403 : 400).json({ error: error.message });
         }

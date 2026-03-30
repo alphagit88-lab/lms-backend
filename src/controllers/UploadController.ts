@@ -26,16 +26,17 @@ export class UploadController {
             // Allowed types: images, videos
             return {
               allowedContentTypes: [
-                "image/jpeg",
-                "image/png",
-                "image/webp",
-                "image/gif",
-                "video/mp4",
-                "video/webm",
-                "video/x-matroska", 
-                "video/quicktime",
+                "image/jpeg", "image/png", "image/webp", "image/gif",
+                "video/mp4", "video/webm", "video/x-matroska", "video/quicktime",
+                "audio/mpeg", "audio/wav", "audio/ogg",
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
               ],
               tokenPayload: JSON.stringify({ userId, role: userRole }),
+
             };
           },
           onUploadCompleted: async ({ blob, tokenPayload }: { blob: PutBlobResult; tokenPayload?: string | null }) => {

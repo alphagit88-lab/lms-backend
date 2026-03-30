@@ -46,10 +46,10 @@
     "sharp": "^0.34.5",
     "tesseract.js": "^7.0.0",
     "typeorm": "^0.3.28",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "@neondatabase/serverless": "^1.0.2"
   },
   "devDependencies": {
-    "@neondatabase/serverless": "^1.0.2",
     "@types/bcryptjs": "^3.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",

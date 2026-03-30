@@ -4,9 +4,12 @@ import { Lesson } from "../entities/Lesson";
 import { Course } from "../entities/Course";
 import fs from "fs";
 import path from "path";
+import { FileStorageService } from "../services/FileStorageService";
 
 const lessonRepository = AppDataSource.getRepository(Lesson);
 const courseRepository = AppDataSource.getRepository(Course);
+const fileStorageService = new FileStorageService();
+
 
 export class LessonController {
   /**
@@ -149,8 +152,14 @@ export class LessonController {
       // Determine video URL source
       let finalVideoUrl = videoUrl;
       if (req.file) {
-        finalVideoUrl = `/uploads/course-media/${req.file.filename}`;
+        const fileResult = await fileStorageService.saveFile(
+          req.file as any,
+          req.file.mimetype.startsWith("video/") ? "video" : "document",
+          userId || "system"
+        );
+        finalVideoUrl = fileResult.fileUrl;
       }
+
 
       // Ensure param is string
       if (Array.isArray(courseId)) {
@@ -252,8 +261,14 @@ export class LessonController {
       // Determine video URL source
       let finalVideoUrl = videoUrl;
       if (req.file) {
-        finalVideoUrl = `/uploads/course-media/${req.file.filename}`;
+        const fileResult = await fileStorageService.saveFile(
+          req.file as any,
+          req.file.mimetype.startsWith("video/") ? "video" : "document",
+          userId || "system"
+        );
+        finalVideoUrl = fileResult.fileUrl;
       }
+
 
       // Ensure param is string
       if (Array.isArray(id)) {
@@ -350,12 +365,9 @@ export class LessonController {
 
       await lessonRepository.remove(lesson);
 
-      // Attempt to delete associated video file if it's local
-      if (lesson.videoUrl && lesson.videoUrl.startsWith("/uploads")) {
-        const filePath = path.join(process.cwd(), lesson.videoUrl);
-        fs.unlink(filePath, (err) => {
-          if (err) console.error(`[LessonController] Failed to delete file ${filePath}:`, err);
-        });
+      // Attempt to delete associated video file
+      if (lesson.videoUrl) {
+        await fileStorageService.deleteFile(lesson.videoUrl);
       }
 
       res.json({ message: "Lesson deleted successfully" });

@@ -21,15 +21,8 @@ const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf
 const ALLOWED_EXTS  = [".jpg", ".jpeg", ".png", ".webp", ".pdf"];
 const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
-const storage = isVercel
-    ? multer.memoryStorage()
-    : multer.diskStorage({
-        destination: (_req, _file, cb) => cb(null, BANK_SLIPS_DIR),
-        filename: (_req, file, cb) => {
-            const ext = path.extname(file.originalname).toLowerCase();
-            cb(null, `${crypto.randomUUID()}${ext}`);
-        },
-    });
+const storage = multer.memoryStorage();
+
 
 const fileFilter = (
     _req: Express.Request,

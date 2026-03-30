@@ -9,12 +9,15 @@ import { Category } from "../entities/Category";
 import { TeacherProfile } from "../entities/TeacherProfile";
 import { validatePrice, validateStringLength } from "../utils/validation";
 import { parsePagination, createPaginationMeta } from "../utils/pagination";
+import { FileStorageService } from "../services/FileStorageService";
 import { Logger } from "../utils/logger";
 
 const courseRepository = AppDataSource.getRepository(Course);
 const userRepository = AppDataSource.getRepository(User);
 const categoryRepository = AppDataSource.getRepository(Category);
 const teacherProfileRepository = AppDataSource.getRepository(TeacherProfile);
+const fileStorageService = new FileStorageService();
+
 
 export class CourseController {
   /**
@@ -527,64 +530,24 @@ export class CourseController {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      // Log file details for debugging
-      console.log('File upload details:', {
-        filename: req.file.filename,
-        originalname: req.file.originalname,
-        path: req.file.path,
-        size: req.file.size,
-        mimetype: req.file.mimetype
+      const userId = req.session.userId || "system";
+      
+      // Determine content type for storage categorization
+      let contentType = "images";
+      if (req.file.mimetype.startsWith("video/")) contentType = "video";
+      else if (req.file.mimetype.startsWith("audio/")) contentType = "audio";
+      else if (req.file.mimetype === "application/pdf") contentType = "pdf";
+
+      const fileResult = await fileStorageService.saveFile(
+        req.file as any, 
+        contentType,
+        userId
+      );
+
+      res.json({ 
+        message: "File uploaded successfully", 
+        url: fileResult.fileUrl 
       });
-
-      // Ensure filename exists. If Multer failed to populate it but file exists on disk, use basename of path.
-      let filename = req.file.filename;
-      if (!filename) {
-        if (req.file.path) {
-          filename = path.basename(req.file.path);
-        } else {
-          // Fallback if no path (e.g. memory storage)
-          const ext = path.extname(req.file.originalname).toLowerCase();
-          filename = `${crypto.randomUUID()}${ext}`;
-        }
-      }
-      
-      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
-      let fileUrl = `/uploads/course-media/${filename}`;
-      
-      if (blobToken) {
-        // Upload to Vercel blob using the local file that was saved by diskStorage
-        const { put } = require('@vercel/blob');
-        
-        // If file.path exists content is on disk, otherwise buffer might be in memory (if configuration changed)
-        // Standard setup uses diskStorage so fs.readFileSync is correct
-        let fileBuffer;
-        if (req.file.path && fs.existsSync(req.file.path)) {
-           fileBuffer = fs.readFileSync(req.file.path);
-        } else if (req.file.buffer) {
-           fileBuffer = req.file.buffer;
-        } else {
-           throw new Error("File content not available for upload");
-        }
-
-        const { url } = await put(`uploads/course-media/${filename}`, fileBuffer, {
-          access: 'public',
-          token: blobToken,
-        });
-        
-        fileUrl = url;
-
-        // Clean up the temporary file from the local/tmp disk since it's uploaded
-        if (req.file.path && fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
-      } else {
-        // If we are on Vercel but no blob token, warn about ephemeral storage
-        if (process.env.VERCEL) {
-          console.warn("WARNING: Uploading to local ephemeral storage on Vercel. Files will be lost. Configure BLOB_READ_WRITE_TOKEN.");
-        }
-      }
-
-      res.json({ message: "File uploaded successfully", url: fileUrl });
     } catch (error) {
       console.error("Upload course media error:", error);
       res.status(500).json({ error: "Failed to upload file" });
@@ -602,31 +565,11 @@ export class CourseController {
         return res.status(400).json({ error: "No URL provided" });
       }
 
-      const blobToken = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN;
-      if (blobToken && url.includes('public.blob.vercel-storage.com')) {
-        const { del } = require('@vercel/blob');
-        await del(url, { token: blobToken });
-        return res.json({ message: "Media removed successfully from cloud storage" });
-      }
-
-      // Check if it's a local file and starts with the upload prefix
-      // We check for the filename only to be safe
-      if (url.includes("/uploads/course-media/")) {
-        const urlParts = url.split("/");
-        const filename = urlParts[urlParts.length - 1];
-        
-        // Basic security check: ensure it's just a filename, no path traversal
-        if (filename && !filename.includes("..")) {
-          const isVercelContext = !!process.env.VERCEL;
-          const uploadBase = isVercelContext ? "/tmp" : process.cwd();
-          const filePath = path.join(uploadBase, "uploads", "course-media", filename);
-          
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        }
+      if (url) {
+        await fileStorageService.deleteFile(url);
       }
       res.json({ message: "Media removed successfully" });
+
     } catch (error) {
       console.error("Delete course media error:", error);
       res.status(500).json({ error: "Failed to remove file" });

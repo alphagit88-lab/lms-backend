@@ -7,6 +7,7 @@ import { User } from "../entities/User";
 import { CommissionService } from "./CommissionService";
 import { Enrollment } from "../entities/Enrollment";
 import { Booking, BookingStatus } from "../entities/Booking";
+import { BookingPackage, PackageStatus } from "../entities/BookingPackage";
 import { Course } from "../entities/Course";
 import { TeacherProfile } from "../entities/TeacherProfile";
 
@@ -41,7 +42,7 @@ class PaymentService {
         amount: number;
         isFree: boolean;
     }> {
-        const {
+        let {
             userId,
             amount,
             currency,
@@ -55,8 +56,33 @@ class PaymentService {
             phone,
         } = params;
 
-        // Platform fee mapping using CommissionService
+        // --- Price Verification & Recipient Lookup ---
+        // Story 2.7: Prevent student from spoofing lower prices in the request body
+        if (type === PaymentType.BOOKING_SESSION) {
+            const booking = await this.bookingRepo.findOne({ where: { id: referenceId } });
+            if (!booking) throw new Error("Booking not found.");
+            if (booking.studentId !== userId && booking.bookedById !== userId) throw new Error("Unauthorized.");
+            if (booking.status !== BookingStatus.PENDING_PAYMENT) {
+                throw new Error(`Booking is not awaiting payment. Status: ${booking.status}`);
+            }
+            amount = Number(booking.amount) || 0;
+            recipientId = booking.teacherId;
+        } else if (type === PaymentType.BOOKING_PACKAGE) {
+            const pkg = await AppDataSource.getRepository(BookingPackage).findOne({ where: { id: referenceId } });
+            if (!pkg) throw new Error("Package not found.");
+            if (pkg.studentId !== userId && pkg.bookedById !== userId) throw new Error("Unauthorized.");
+            amount = Number(pkg.finalPrice) || 0;
+            recipientId = pkg.teacherId || recipientId;
+        } else if (type === PaymentType.COURSE_ENROLLMENT) {
+            const course = await this.courseRepo.findOne({ where: { id: referenceId } });
+            if (!course) throw new Error("Course not found.");
+            amount = Number(course.price) || 0;
+            recipientId = course.instructorId;
+        }
+
+        // Platform fee mapping
         const { platformFee } = CommissionService.calculate(amount);
+
 
         // Check for an existing PENDING payment for this same reference to avoid duplicates
         let payment = await this.paymentRepo.findOne({
@@ -679,6 +705,58 @@ class PaymentService {
         });
         payment = await this.paymentRepo.save(payment);
         return { paymentId: payment.id, amount };
+    }
+
+    /**
+     * Specialized manual payment initialization for a booking session.
+     * Fetches booking details from DB to ensure amount and recipientId are correct.
+     */
+    async initializeBookingManualPayment(bookingId: string, userId: string): Promise<{ paymentId: string; amount: number }> {
+        const booking = await this.bookingRepo.findOne({
+            where: { id: bookingId }
+        });
+
+        if (!booking) throw new Error("Booking not found.");
+        if (booking.studentId !== userId && booking.bookedById !== userId) throw new Error("Unauthorized.");
+        if (booking.status !== BookingStatus.PENDING_PAYMENT) {
+            throw new Error(`Booking is not awaiting payment. Current status: ${booking.status}`);
+        }
+
+        const amount = Number(booking.amount) || 0;
+        if (amount <= 0) throw new Error("This booking does not require payment.");
+
+        return this.initializeBankTransferPayment({
+            userId,
+            amount,
+            currency: "LKR",
+            type: PaymentType.BOOKING_SESSION,
+            referenceId: bookingId,
+            recipientId: booking.teacherId,
+        });
+    }
+
+    /**
+     * Specialized manual payment initialization for a booking package.
+     */
+    async initializePackageManualPayment(packageId: string, userId: string): Promise<{ paymentId: string; amount: number }> {
+        const pkg = await AppDataSource.getRepository(BookingPackage).findOne({
+            where: { id: packageId }
+        });
+
+        if (!pkg) throw new Error("Booking package not found.");
+        if (pkg.studentId !== userId && pkg.bookedById !== userId) throw new Error("Unauthorized.");
+        
+        const amount = Number(pkg.finalPrice) || 0;
+        if (amount <= 0) throw new Error("This package does not require payment.");
+
+        return this.initializeBankTransferPayment({
+            userId,
+            amount,
+            currency: "LKR",
+            type: PaymentType.BOOKING_PACKAGE,
+            referenceId: packageId,
+            recipientId: pkg.teacherId || undefined,
+        });
     }
 
     /**

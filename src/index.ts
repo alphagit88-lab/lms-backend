@@ -75,6 +75,7 @@ app.use(express.urlencoded({ limit: "500mb", extended: true }));
 
 // 2. Lazy DB init for serverless environments (e.g. Vercel)
 let dbMigrated = false;
+let isInitializing = false;
 app.use(async (req: Request, res: Response, next) => {
   // CRITICAL: Preflight requests (OPTIONS) MUST skip the database connection
   // Otherwise, the browser hangs forever while the database tries to wake up.
@@ -83,23 +84,39 @@ app.use(async (req: Request, res: Response, next) => {
   }
 
   if (!AppDataSource.isInitialized) {
-    try {
-      console.log("... Connecting to database ...");
-      await AppDataSource.initialize();
-      console.log("✓ Database connected successfully");
-    } catch (error: any) {
-      console.error("✗ Database connection failed:", error);
-      return res.status(500).json({ 
-        error: "Database connection failed", 
-        message: error?.message || "Unknown error during initialization"
-      });
+    if (isInitializing) {
+        // Wait and poll or just wait a bit (simplest is to just wait and let retry happen)
+        // But better is to just wait for the other one to finish
+        while (isInitializing) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            if (AppDataSource.isInitialized) break;
+        }
+    }
+
+    if (!AppDataSource.isInitialized) {
+        isInitializing = true;
+        try {
+          console.log("... Middleware connecting to database ...");
+          await AppDataSource.initialize();
+          console.log("✓ Middleware database connection successful");
+        } catch (error: any) {
+          console.error("✗ Middleware database connection failed:", error);
+          isInitializing = false;
+          return res.status(500).json({ 
+            error: "Database connection failed", 
+            message: error?.message || "Unknown error during initialization"
+          });
+        } finally {
+          isInitializing = false;
+        }
     }
   }
 
   // One-time migration: ensure `destroyedAt` column exists on app_sessions
+  // One-time migration: ensure `destroyedAt` column exists on app_sessions
   // (Required by connect-typeorm v2 for soft-delete; without it, logout fails
   //  silently and subsequent logins crash with duplicate key errors.)
-  if (!dbMigrated) {
+  if (!dbMigrated && AppDataSource.isInitialized) {
     dbMigrated = true; // set early to prevent concurrent migrations
     try {
       const cols = await AppDataSource.query(
@@ -108,7 +125,6 @@ app.use(async (req: Request, res: Response, next) => {
       if (cols.length === 0) {
         await AppDataSource.query(`ALTER TABLE "app_sessions" ADD COLUMN "destroyedAt" TIMESTAMP`);
         // Purge all existing sessions since they lack the destroyedAt column
-        // and may cause duplicate key errors
         await AppDataSource.query(`DELETE FROM "app_sessions"`);
         console.log("✓ Added missing destroyedAt column to app_sessions and purged stale sessions");
       }
@@ -119,6 +135,7 @@ app.use(async (req: Request, res: Response, next) => {
 
   next();
 });
+
 
 import { getSessionStore } from "./config/session-store";
 
@@ -258,29 +275,35 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 // Start server + background jobs only outside Vercel serverless
+// Start server immediately; database will be initialized as a separate task
 if (!process.env.VERCEL) {
-  AppDataSource.initialize()
-    .then(() => {
-      console.log("✓ Database connected successfully");
+  app.listen(PORT, () => {
+    console.log(`✓ Server is running on port ${PORT}`);
+    console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
 
-      app.listen(PORT, () => {
-        console.log(`✓ Server is running on port ${PORT}`);
-        console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
-
-        // Start background jobs
-        RecordingFetchJob.start(30 * 60 * 1000); // Check every 30 mins
+    // Trigger database initialization without blocking the event loop
+    console.log("... Starting background database connection ...");
+    AppDataSource.initialize()
+      .then(() => {
+        console.log("✓ Background database connection successful");
+        
+        // Only start background jobs after database is ready
+        console.log("✓ Starting scheduled background jobs");
+        RecordingFetchJob.start(30 * 60 * 1000); 
         startPayoutJob();
         startBookingCleanupJob();
         startReminderJob();
         startParentReportJob();
         startPerformanceAlertJob();
+      })
+      .catch((error) => {
+        console.error("✗ Background database connection failed:", error);
+        // We don't exit here because the server is still serving requests (which might also fail, but better than a dead process)
       });
-    })
-    .catch((error) => {
-      console.error("✗ Database connection failed:", error);
-      process.exit(1);
-    });
+  });
 }
+
+
 
 export default app;
 

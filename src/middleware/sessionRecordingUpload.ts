@@ -22,24 +22,8 @@ const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/x-matroska", "vid
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"]; // .jpg, .png, .webp, .gif
 const MAX_SIZE = 500 * 1024 * 1024; // 500MB
 
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        // Ensure directory exists just in case
-        if (!fs.existsSync(RECORDING_MEDIA_DIR)) {
-            try {
-                fs.mkdirSync(RECORDING_MEDIA_DIR, { recursive: true });
-            } catch (err) {
-                return cb(err as Error, RECORDING_MEDIA_DIR); 
-            }
-        }
-        cb(null, RECORDING_MEDIA_DIR);
-    },
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const uniqueName = `${crypto.randomUUID()}${ext}`;
-        cb(null, uniqueName);
-    },
-});
+const storage = multer.memoryStorage();
+
 
 const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
     if (file.fieldname === "videoFile") {

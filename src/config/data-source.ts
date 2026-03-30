@@ -31,19 +31,33 @@ import { Notification } from "../entities/Notification";
 import { Content } from "../entities/Content";
 import { AppSession } from "../entities/AppSession";
 
+import * as pg from "@neondatabase/serverless";
 dotenv.config();
+
+// Attempt to set up WebSockets for Node environments if ws is available
+// (Native WebSockets in Node 22+ are also automatically detected by newer neon-serverless versions)
+try {
+  const ws = require("ws");
+  if (ws && (pg as any).neonConfig) {
+      (pg as any).neonConfig.webSocketConstructor = ws;
+  }
+} catch (e) {
+  // ws not found, neon-serverless will try to use global.WebSocket or fallback
+}
 
 export const AppDataSource = new DataSource({
   type: "postgres",
+  driver: pg,
   host: process.env.DB_HOST || "localhost",
   port: parseInt(process.env.DB_PORT || "5432"),
   username: process.env.DB_USERNAME || "postgres",
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE || "lms_db",
   ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
-  synchronize: process.env.NODE_ENV === "development",
-  logging: process.env.NODE_ENV === "development",
+  synchronize: false, // Turn off for stability during dev debugging
+  logging: true, // Show us what's happening
   entities: [
+
     User, Category, Course, Lesson, Enrollment, LessonProgress,
     StudentParent, TeacherAssistant,
     AvailabilitySlot, Booking, BookingPackage,

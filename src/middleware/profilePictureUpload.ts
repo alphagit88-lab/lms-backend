@@ -22,18 +22,9 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 
 /**
  * Multer storage configuration for profile pictures
- * Uses /tmp directory on Vercel serverless functions, and local 'uploads' directory locally.
  */
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => {
-        cb(null, PROFILE_PICS_DIR);
-    },
-    filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        const uniqueName = `${crypto.randomUUID()}${ext}`;
-        cb(null, uniqueName);
-    },
-});
+const storage = multer.memoryStorage();
+
 
 /**
  * File filter — only allow image files
