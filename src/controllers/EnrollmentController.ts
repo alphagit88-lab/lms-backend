@@ -25,7 +25,13 @@ export class EnrollmentController {
 
       const enrollments = await enrollmentRepository.find({
         where: { studentId: userId },
-        relations: ["course", "course.instructor", "course.category", "course.lessons"],
+        relations: [
+          "course",
+          "course.instructor",
+          "course.category",
+          "course.lessons",
+          "lessonProgress",
+        ],
         order: { enrolledAt: "DESC" },
       });
 
@@ -483,15 +489,21 @@ export class EnrollmentController {
       (completedLessons / totalLessons) * 100
     );
 
-    enrollment.progressPercentage = progressPercentage;
+    const updateData: any = {
+      progressPercentage,
+    };
 
     // Mark as completed if 100%
     if (progressPercentage === 100 && enrollment.status !== "completed") {
-      enrollment.status = "completed";
-      enrollment.completedAt = new Date();
+      updateData.status = "completed";
+      updateData.completedAt = new Date();
+    } else if (progressPercentage < 100 && enrollment.status === "completed") {
+      // Revert to active if new lessons added and percentage drops
+      updateData.status = "active";
+      updateData.completedAt = null;
     }
 
-    await enrollmentRepository.save(enrollment);
+    await enrollmentRepository.update(enrollmentId, updateData);
   }
 
   /**
